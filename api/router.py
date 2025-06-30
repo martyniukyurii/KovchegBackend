@@ -194,6 +194,7 @@ class Router:
 
         # Parsed Listings routes (з JWT токеном)
         self.parsed_listings_router.get("/", summary="Отримати спарсені оголошення")(self.parsed_listings_handler.get_parsed_listings)
+        self.parsed_listings_router.get("/stats", summary="Отримати статистику по спарсеним оголошенням")(self.parsed_listings_handler.get_parsed_listings_stats)
         self.parsed_listings_router.get("/{listing_id}", summary="Отримати спарсене оголошення за ID")(self.parsed_listings_handler.get_parsed_listing)
         self.parsed_listings_router.post("/", summary="Створити спарсене оголошення")(self.parsed_listings_handler.create_parsed_listing)
         self.parsed_listings_router.put("/{listing_id}/status", summary="Оновити статус спарсеного оголошення")(self.parsed_listings_handler.update_parsed_listing_status)

@@ -16,13 +16,38 @@ class ParsedListingsEndpoints:
     async def get_parsed_listings(
         self,
         request: Request,
-        source: Optional[str] = Query(None),
-        status_filter: Optional[str] = Query(None),
+        source: Optional[str] = Query(None, description="Джерело парсингу (OLX, M2BOMBER)"),
+        status_filter: Optional[str] = Query(None, description="Статус оголошення (new, processed, converted)"),
+        property_type: Optional[str] = Query(None, description="Тип нерухомості (commerce, orenda, prodazh, zemlya)"),
+        min_price: Optional[float] = Query(None, ge=0, description="Мінімальна ціна"),
+        max_price: Optional[float] = Query(None, ge=0, description="Максимальна ціна"),
+        currency: Optional[str] = Query(None, description="Валюта (UAH, USD, EUR)"),
+        min_area: Optional[float] = Query(None, ge=0, description="Мінімальна площа"),
+        max_area: Optional[float] = Query(None, ge=0, description="Максимальна площа"),
+        min_rooms: Optional[int] = Query(None, ge=0, description="Мінімальна кількість кімнат"),
+        max_rooms: Optional[int] = Query(None, ge=0, description="Максимальна кількість кімнат"),
+        city: Optional[str] = Query(None, description="Місто"),
+        sort_by: Optional[str] = Query("parsed_at", description="Поле для сортування (parsed_at, price, area, rooms, created_at)"),
+        sort_order: Optional[str] = Query("desc", description="Порядок сортування (asc, desc)"),
+        search_text: Optional[str] = Query(None, description="Пошук по тексту в назві та описі"),
         page: int = Query(1, ge=1),
         limit: int = Query(10, ge=1, le=50)
     ) -> Dict[str, Any]:
         """
-        Отримати спарсені оголошення (потребує авторизації).
+        Отримати спарсені оголошення з фільтрами та сортуванням (потребує авторизації).
+        
+        Доступні фільтри:
+        - source: джерело парсингу (OLX, M2BOMBER)
+        - status_filter: статус оголошення (new, processed, converted)
+        - property_type: тип нерухомості (commerce, orenda, prodazh, zemlya)
+        - min_price/max_price: ціновий діапазон
+        - currency: валюта (UAH, USD, EUR)
+        - min_area/max_area: діапазон площі
+        - min_rooms/max_rooms: діапазон кількості кімнат
+        - city: пошук по місту
+        - search_text: пошук по тексту в назві та описі
+        - sort_by: поле для сортування (parsed_at, price, area, rooms, created_at)
+        - sort_order: порядок сортування (asc, desc)
         """
         try:
             # Отримання користувача з токена
@@ -39,17 +64,63 @@ class ParsedListingsEndpoints:
             
             # Формування фільтрів
             filters = {}
+            
+            # Базові фільтри
             if source:
                 filters["source"] = source
             if status_filter:
                 filters["status"] = status_filter
+            if property_type:
+                filters["property_type"] = property_type
+            if currency:
+                filters["currency"] = currency
+            if city:
+                filters["location.city"] = {"$regex": city, "$options": "i"}
+            
+            # Ціновий діапазон
+            if min_price is not None or max_price is not None:
+                price_filter = {}
+                if min_price is not None:
+                    price_filter["$gte"] = min_price
+                if max_price is not None:
+                    price_filter["$lte"] = max_price
+                filters["price"] = price_filter
+            
+            # Діапазон площі
+            if min_area is not None or max_area is not None:
+                area_filter = {}
+                if min_area is not None:
+                    area_filter["$gte"] = min_area
+                if max_area is not None:
+                    area_filter["$lte"] = max_area
+                filters["area"] = area_filter
+            
+            # Діапазон кімнат
+            if min_rooms is not None or max_rooms is not None:
+                rooms_filter = {}
+                if min_rooms is not None:
+                    rooms_filter["$gte"] = min_rooms
+                if max_rooms is not None:
+                    rooms_filter["$lte"] = max_rooms
+                filters["rooms"] = rooms_filter
+            
+            # Текстовий пошук
+            if search_text:
+                filters["$or"] = [
+                    {"title": {"$regex": search_text, "$options": "i"}},
+                    {"description": {"$regex": search_text, "$options": "i"}}
+                ]
+            
+            # Формування сортування
+            sort_field = sort_by if sort_by in ["parsed_at", "price", "area", "rooms", "created_at"] else "parsed_at"
+            sort_direction = -1 if sort_order == "desc" else 1
             
             skip = (page - 1) * limit
             listings = await self.db.parsed_listings.find(
                 filters,
                 skip=skip,
                 limit=limit,
-                sort=[("parsed_at", -1)]
+                sort=[(sort_field, sort_direction)]
             )
             
             # Підрахунок загальної кількості
@@ -555,5 +626,98 @@ class ParsedListingsEndpoints:
         except Exception as e:
             return Response.error(
                 message=f"Помилка при отриманні статусу задачі: {str(e)}",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    async def get_parsed_listings_stats(self, request: Request) -> Dict[str, Any]:
+        """
+        Отримати статистику по спарсеним оголошенням (потребує авторизації).
+        """
+        try:
+            # Отримання користувача з токена
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                return Response.error("Токен авторизації обов'язковий", status_code=status.HTTP_401_UNAUTHORIZED)
+            
+            token = auth_header.split(" ")[1]
+            payload = self.jwt_handler.decode_token(token)
+            user_id = payload.get("sub")
+            
+            if not user_id:
+                return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
+            
+            # Загальна кількість оголошень
+            total_listings = await self.db.parsed_listings.count({})
+            
+            # Статистика по джерелам
+            sources_stats = await self.db.parsed_listings.aggregate([
+                {"$group": {"_id": "$source", "count": {"$sum": 1}}}
+            ])
+            
+            # Статистика по статусам
+            status_stats = await self.db.parsed_listings.aggregate([
+                {"$group": {"_id": "$status", "count": {"$sum": 1}}}
+            ])
+            
+            # Статистика по типам нерухомості
+            property_type_stats = await self.db.parsed_listings.aggregate([
+                {"$group": {"_id": "$property_type", "count": {"$sum": 1}}}
+            ])
+            
+            # Статистика по валютах
+            currency_stats = await self.db.parsed_listings.aggregate([
+                {"$group": {"_id": "$currency", "count": {"$sum": 1}}}
+            ])
+            
+            # Статистика по містах
+            city_stats = await self.db.parsed_listings.aggregate([
+                {"$group": {"_id": "$location.city", "count": {"$sum": 1}}},
+                {"$sort": {"count": -1}},
+                {"$limit": 10}
+            ])
+            
+            # Середня ціна по типах нерухомості
+            avg_price_stats = await self.db.parsed_listings.aggregate([
+                {"$match": {"price": {"$gt": 0}}},
+                {"$group": {
+                    "_id": "$property_type", 
+                    "avg_price": {"$avg": "$price"},
+                    "min_price": {"$min": "$price"},
+                    "max_price": {"$max": "$price"},
+                    "count": {"$sum": 1}
+                }}
+            ])
+            
+            # Статистика за останні 30 днів
+            from datetime import datetime, timedelta
+            thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+            
+            recent_stats = await self.db.parsed_listings.aggregate([
+                {"$match": {"parsed_at": {"$gte": thirty_days_ago}}},
+                {"$group": {
+                    "_id": {
+                        "year": {"$year": "$parsed_at"},
+                        "month": {"$month": "$parsed_at"},
+                        "day": {"$dayOfMonth": "$parsed_at"}
+                    },
+                    "count": {"$sum": 1}
+                }},
+                {"$sort": {"_id": 1}}
+            ])
+            
+            return Response.success({
+                "total_listings": total_listings,
+                "sources": sources_stats,
+                "statuses": status_stats,
+                "property_types": property_type_stats,
+                "currencies": currency_stats,
+                "top_cities": city_stats,
+                "price_statistics": avg_price_stats,
+                "recent_activity": recent_stats
+            })
+            
+        except Exception as e:
+            return Response.error(
+                message=f"Помилка при отриманні статистики: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             ) 
