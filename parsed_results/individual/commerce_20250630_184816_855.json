@@ -1,0 +1,31 @@
+{
+  "url": "https://www.olx.ua/d/uk/obyavlenie/zdatsya-v-orendu-magazin-gravton-IDXv72r.html",
+  "title": "Здається в оренду магазин Гравітон: 300 $ - Оренда торгових приміщень Чернівці на Olx",
+  "price": 300,
+  "currency": "USD",
+  "price_uah": 12534,
+  "price_usd": 300,
+  "price_eur": 256,
+  "floor": null,
+  "area": 50.0,
+  "description": "ОПИС\nЗдається в оренду магазин продукти .\nЗагальна площа магазину скаладає 50 м2\nВласний сан вузол в магазині.\nВода та світло по лічильнику. Опалення кондиціонер та конвектор.\nОкреме приміщення на дуже прохідному місці , зупинка громадського транспорту .\nПослуги ринку в місяць складають : 5000-5500грн.\nДеталі за телефоном.",
+  "tags": [
+    "Бізнес",
+    "Розташування: Окреме приміщення",
+    "Загальна площа: 50 м²",
+    "Cанвузол: Так",
+    "Опалення: Індивідуальне електро",
+    "Тип: Місце на ринку"
+  ],
+  "phone": null,
+  "location": "Гравітон, Чернівці.",
+  "images": [
+    "https://ireland.apollo.olxcdn.com:443/v1/files/x1exgipsr5jw-UA/image;s=750x1000",
+    "https://ireland.apollo.olxcdn.com:443/v1/files/6mjokhyihheb-UA/image;s=750x1000",
+    "https://ireland.apollo.olxcdn.com:443/v1/files/f61eodoztz81-UA/image;s=750x1000",
+    "https://ireland.apollo.olxcdn.com:443/v1/files/eu3975q2ettv1-UA/image;s=1000x750",
+    "https://ireland.apollo.olxcdn.com:443/v1/files/9at37djmw6x93-UA/image;s=1000x750"
+  ],
+  "parsed_at": "2025-06-30T18:48:16.855081",
+  "property_type": "commerce"
+}

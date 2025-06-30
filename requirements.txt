@@ -1,0 +1,44 @@
+# FastAPI та основні залежності
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database
+motor==3.3.2
+pymongo==4.6.0
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# LangChain та AI
+langchain==0.1.0
+langchain-openai==0.0.2
+langchain-community==0.0.10
+openai==1.6.1
+
+# Environment
+python-dotenv==1.0.0
+
+# Email
+resend==0.6.0
+
+# Utilities
+pydantic==2.5.0
+requests==2.31.0
+aiofiles==23.2.1
+
+# Date and time
+python-dateutil==2.8.2
+
+# Logging
+structlog==23.2.0
+
+# Task Scheduling
+schedule==1.2.0 
+
+# Web scraping
+playwright==1.40.0
+beautifulsoup4==4.12.2
+lxml==4.9.3

@@ -1,0 +1,332 @@
+DB: VashKovchegCRM
+├── users
+│   ├── _id (primary key)
+│   ├── first_name
+│   ├── last_name
+│   ├── email
+│   ├── phone
+│   ├── login
+│   ├── password
+│   ├── created_at
+│   ├── language_code
+│   ├── is_verified
+│   ├── oauth2_info
+│   │   ├── provider
+│   │   ├── provider_id
+│   │   └── access_token
+│   ├── telegram_id
+│   ├── favorites
+│   │   └── [property_ids] (references properties._id)
+│   ├── search_history
+│   │   └── [search_queries]
+│   └── notifications_settings
+│       ├── telegram
+│       └── email
+├── verification_codes
+│   ├── _id (primary key)
+│   ├── user_id (references users._id)
+│   ├── code
+│   ├── created_at
+│   ├── expires_at
+│   └── email
+├── admins
+│   ├── _id (primary key)
+│   ├── first_name
+│   ├── last_name
+│   ├── email
+│   ├── phone
+│   ├── created_at
+│   ├── login
+│   ├── password
+│   ├── language_code
+│   ├── is_verified
+│   ├── role
+│   └── telegram_id
+├── properties
+│   ├── _id (primary key)
+│   ├── title
+│   ├── description
+│   ├── property_type
+│   ├── status
+│   │   ├── for_sale
+│   │   ├── for_rent
+│   │   └── sold
+│   ├── price
+│   │   ├── amount
+│   │   └── currency
+│   ├── rent_price
+│   │   ├── amount
+│   │   ├── currency
+│   │   └── period
+│   ├── location
+│   │   ├── address
+│   │   ├── city
+│   │   ├── region
+│   │   ├── postal_code
+│   │   ├── country
+│   │   └── coordinates
+│   │       ├── latitude
+│   │       └── longitude
+│   ├── features
+│   │   ├── bedrooms
+│   │   ├── bathrooms
+│   │   ├── area
+│   │   ├── land_area
+│   │   ├── floors
+│   │   ├── year_built
+│   │   ├── heating_type
+│   │   └── [amenities]
+│   ├── media
+│   │   ├── photos
+│   │   ├── videos
+│   │   └── virtual_tour_url
+│   ├── owner_id (references users._id)
+│   ├── agent_id (references agents._id)
+│   ├── created_at
+│   ├── updated_at
+│   ├── views_count
+│   ├── vector_embedding
+│   ├── parsed_listing_id (references parsed_listings._id, optional)
+│   └── metadata
+│       └── parsed_source
+├── agents
+│   ├── _id (primary key)
+│   ├── user_id (references users._id)
+│   ├── bio
+│   ├── experience_years
+│   ├── specializations
+│   ├── certifications
+│   ├── rating
+│   ├── reviews_count
+│   ├── properties_sold
+│   ├── properties_rented
+│   ├── active_listings
+│   └── training_programs
+│       └── [program_ids] (references training_programs._id)
+├── clients
+│   ├── _id (primary key)
+│   ├── agent_id (references agents._id)
+│   ├── user_id (references users._id, optional)
+│   ├── first_name
+│   ├── last_name
+│   ├── email
+│   ├── phone
+│   ├── preferences
+│   │   ├── property_type
+│   │   ├── price_range
+│   │   ├── location
+│   │   └── features
+│   ├── status
+│   ├── created_at
+│   └── updated_at
+├── deals
+│   ├── _id (primary key)
+│   ├── property_id (references properties._id)
+│   ├── seller_id (references users._id or clients._id)
+│   ├── buyer_id (references users._id or clients._id)
+│   ├── agent_id (references agents._id)
+│   ├── deal_type
+│   ├── status
+│   ├── price
+│   ├── commission
+│   ├── start_date
+│   ├── close_date
+│   ├── documents
+│   │   └── [document_ids] (references documents._id)
+│   └── notes
+├── calendar_events
+│   ├── _id (primary key)
+│   ├── title
+│   ├── description
+│   ├── event_type
+│   ├── start_time
+│   ├── end_time
+│   ├── location
+│   ├── participants
+│   │   ├── agents (references agents._id)
+│   │   └── clients (references clients._id)
+│   ├── property_id (references properties._id, optional)
+│   ├── created_by (references users._id or admins._id)
+│   ├── created_at
+│   └── updated_at
+├── documents
+│   ├── _id (primary key)
+│   ├── title
+│   ├── description
+│   ├── file_path
+│   ├── file_type
+│   ├── size
+│   ├── related_to
+│   │   ├── type
+│   │   └── id (references various collections based on type)
+│   ├── uploaded_by (references users._id or admins._id)
+│   ├── created_at
+│   └── updated_at
+├── marketing_campaigns
+│   ├── _id (primary key)
+│   ├── title
+│   ├── description
+│   ├── platform
+│   ├── status
+│   ├── budget
+│   ├── start_date
+│   ├── end_date
+│   ├── target_audience
+│   ├── metrics
+│   │   ├── impressions
+│   │   ├── clicks
+│   │   ├── conversions
+│   │   └── cost
+│   ├── created_by (references admins._id)
+│   ├── created_at
+│   └── updated_at
+├── notifications
+│   ├── _id (primary key)
+│   ├── user_id (references users._id)
+│   ├── title
+│   ├── message
+│   ├── type
+│   ├── related_to
+│   │   ├── type
+│   │   └── id (references various collections based on type)
+│   ├── is_read
+│   ├── delivery_channels
+│   ├── created_at
+│   └── sent_at
+├── training_programs
+│   ├── _id (primary key)
+│   ├── title
+│   ├── description
+│   ├── content
+│   ├── duration
+│   ├── difficulty
+│   ├── created_by (references admins._id)
+│   ├── created_at
+│   └── updated_at
+└── activity_journal
+    ├── _id (primary key)
+    ├── event_type
+    │   ├── call
+    │   ├── meeting
+    │   ├── email
+    │   ├── payment
+    │   └── other
+    ├── title
+    ├── description
+    ├── timestamp
+    ├── duration
+    ├── status
+    ├── result
+    ├── related_to
+    │   ├── type
+    │   │   ├── client
+    │   │   ├── property
+    │   │   ├── deal
+    │   │   └── other
+    │   └── id (references various collections based on type)
+    ├── participants
+    │   ├── agents (references agents._id)
+    │   ├── clients (references clients._id)
+    │   └── admins (references admins._id)
+    ├── location
+    ├── attachments
+    ├── financial_details
+    │   ├── amount
+    │   ├── currency
+    │   ├── payment_type
+    │   ├── payment_status
+    │   └── payment_purpose
+    ├── follow_up_required
+    ├── follow_up_date
+    ├── created_by (references users._id or admins._id)
+    └── notes
+└── parsed_listings
+    ├── _id (primary key)
+    ├── external_id
+    ├── title
+    ├── description
+    ├── price
+    │   ├── amount
+    │   └── currency
+    ├── rent_price
+    │   ├── amount
+    │   ├── currency
+    │   └── period
+    ├── property_type
+    ├── source
+    │   ├── platform
+    │   │   ├── olx
+    │   │   ├── dom_ria
+    │   │   ├── m2bomber
+    │   │   ├── facebook
+    │   │   └── telegram
+    │   ├── url
+    │   └── original_listing_id
+    ├── location
+    │   ├── address
+    │   ├── city
+    │   ├── region
+    │   ├── postal_code
+    │   ├── country
+    │   └── coordinates
+    │       ├── latitude
+    │       └── longitude
+    ├── features
+    │   ├── bedrooms
+    │   ├── bathrooms
+    │   ├── area
+    │   ├── land_area
+    │   ├── floors
+    │   ├── year_built
+    │   ├── heating_type
+    │   └── [amenities]
+    ├── media
+    │   ├── photos
+    │   ├── videos
+    │   └── virtual_tour_url
+    ├── contact_info
+    │   ├── name
+    │   ├── phone
+    │   ├── email
+    │   └── other
+    ├── imported_to_properties (boolean)
+    ├── property_id (references properties._id, if imported)
+    ├── parsed_at
+    ├── last_checked
+    ├── is_active
+    ├── is_verified
+    ├── vector_embedding
+    └── raw_data
+├── agent_daily_tasks
+    ├── _id (primary key)
+    ├── agent_id (references agents._id)
+    ├── date (YYYY-MM-DD format)
+    ├── tasks
+    │   └── [
+    │       ├── task_id (unique identifier)
+    │       ├── type (call_client, send_property, schedule_meeting, follow_up, marketing, admin)
+    │       ├── priority (high, medium, low)
+    │       ├── title
+    │       ├── description
+    │       ├── estimated_time (minutes)
+    │       ├── status (pending, in_progress, completed, cancelled)
+    │       ├── client_id (references clients._id, optional)
+    │       ├── property_id (references properties._id, optional)
+    │       ├── deal_id (references deals._id, optional)
+    │       ├── created_at
+    │       ├── updated_at
+    │       ├── completed_at
+    │       └── notes
+    │   ]
+    ├── generation_metadata
+    │   ├── generated_at
+    │   ├── generation_method (ai_auto, manual, updated)
+    │   ├── data_snapshot
+    │   │   ├── new_properties_count
+    │   │   ├── active_clients_count
+    │   │   ├── today_events_count
+    │   │   ├── active_deals_count
+    │   └── └── inactive_clients_count
+    ├── last_updated
+    ├── created_at
+    └── expires_at (автоматичне видалення через 3 місяці)

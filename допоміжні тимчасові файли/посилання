@@ -1,0 +1,72 @@
+[{
+  "_id": {
+    "$oid": "66ed37568f418c73c4653a94"
+  },
+  "url": "https://www.olx.ua/nedvizhimost/kommercheskaya-nedvizhimost/chernovtsy/?currency=UAH&search%5Border%5D=created_at:desc",
+  "site": "OLX",
+  "type": "commerce"
+},
+{
+  "_id": {
+    "$oid": "6703a8581d24ae72d8c7dea6"
+  },
+  "url": "https://ua.m2bomber.com/commercial-sell/cernivecka-oblast-3-72526",
+  "site": "M2BOMBER",
+  "type": "commerce"
+},
+{
+  "_id": {
+    "$oid": "6703b12a1d24ae72d8c7dead"
+  },
+  "url": "https://www.olx.ua/uk/nedvizhimost/kvartiry/dolgosrochnaya-arenda-kvartir/chernovtsy/?currency=UAH&search%5Bprivate_business%5D=private&search%5Border%5D=created_at:desc",
+  "site": "OLX",
+  "type": "orenda"
+},
+{
+  "_id": {
+    "$oid": "6703b1831d24ae72d8c7deae"
+  },
+  "url": "https://www.olx.ua/uk/nedvizhimost/kvartiry/prodazha-kvartir/chernovtsy/?currency=UAH&search%5Bprivate_business%5D=private&search%5Border%5D=created_at:desc",
+  "site": "OLX",
+  "type": "prodazh"
+},
+{
+  "_id": {
+    "$oid": "6703b1b21d24ae72d8c7deaf"
+  },
+  "url": "https://www.olx.ua/uk/nedvizhimost/doma/arenda-domov/chernovtsy/?currency=UAH&search%5Bprivate_business%5D=private&search%5Border%5D=created_at:desc",
+  "site": "OLX",
+  "type": "orenda"
+},
+{
+  "_id": {
+    "$oid": "6703b1fc1d24ae72d8c7deb0"
+  },
+  "url": "https://www.olx.ua/uk/nedvizhimost/doma/prodazha-domov/chernovtsy/?currency=UAH&search%5Bprivate_business%5D=private&search%5Border%5D=created_at:desc",
+  "site": "OLX",
+  "type": "prodazh"
+},
+{
+  "_id": {
+    "$oid": "6703b2371d24ae72d8c7deb2"
+  },
+  "url": "https://www.olx.ua/uk/nedvizhimost/zemlya/chernovtsy/?currency=UAH&search%5Bprivate_business%5D=private&search%5Border%5D=created_at:desc",
+  "site": "OLX",
+  "type": "zemlya"
+},
+{
+  "_id": {
+    "$oid": "6703b26f1d24ae72d8c7deb3"
+  },
+  "url": "https://ua.m2bomber.com/search?address=%D0%A7%D0%B5%D1%80%D0%BD%D1%96%D0%B2%D0%B5%D1%86%D1%8C%D0%BA%D0%B0+%D0%BE%D0%B1%D0%BB%D0%B0%D1%81%D1%82%D1%8C&type=flat-sell&osmId=72526&bn=&rooms=&area=&price=&pricePerM2=false&year=&text=&photo=false&owner=true",
+  "site": "M2BOMBER",
+  "type": "prodazh"
+},
+{
+  "_id": {
+    "$oid": "6703b3571d24ae72d8c7deb6"
+  },
+  "url": "https://ua.m2bomber.com/search?address=%D0%A7%D0%B5%D1%80%D0%BD%D1%96%D0%B2%D0%B5%D1%86%D1%8C%D0%BA%D0%B0+%D0%BE%D0%B1%D0%BB%D0%B0%D1%81%D1%82%D1%8C&type=flat-rent&osmId=72526&bn=&rooms=&area=&price=&pricePerM2=false&year=&text=&photo=false&owner=true",
+  "site": "M2BOMBER",
+  "type": "orenda"
+}]
