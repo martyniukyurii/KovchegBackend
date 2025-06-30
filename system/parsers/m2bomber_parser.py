@@ -9,13 +9,15 @@ import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
+from typing import Dict, Optional
 
 # Завантажуємо змінні середовища
 load_dotenv()
 
-# Додаємо tools до Python path для логера
+# Додаємо tools до Python path для логера та бази
 sys.path.append(str(Path(__file__).parent.parent.parent / "tools"))
 from logger import Logger
+from database import SyncDatabase
 
 class M2BomberParser:
     def __init__(self):
@@ -24,6 +26,7 @@ class M2BomberParser:
         self.openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         self.exchange_rates = {}
         self.logger = Logger()
+        self.db = SyncDatabase()
         
         # Створюємо папку для індивідуальних результатів
         self.results_dir = Path(__file__).parent.parent.parent / "parsed_results" / "individual"
@@ -100,22 +103,35 @@ class M2BomberParser:
         else:
             return {'UAH': int(amount), 'USD': int(amount), 'EUR': int(amount)}
 
-    def save_individual_listing(self, listing_data):
-        """Зберігаємо окреме оголошення в індивідуальний файл"""
+    def check_listing_exists(self, url: str) -> bool:
+        """Перевіряємо чи існує оголошення в базі"""
         try:
-            property_type = listing_data.get('property_type', 'unknown')
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-            filename = f"{property_type}_{timestamp}.json"
-            filepath = self.results_dir / filename
-            
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(listing_data, f, ensure_ascii=False, indent=2)
-            
-            self.logger.info(f"💾 Збережено: {filename}")
-            return str(filepath)
-            
+            existing = self.db.parsed_listings.find_one({"url": url})
+            return existing is not None
         except Exception as e:
-            self.logger.error(f"Помилка збереження файлу: {e}")
+            self.logger.error(f"Помилка перевірки існування оголошення: {e}")
+            return False
+    
+    def save_to_database(self, listing_data: Dict) -> Optional[str]:
+        """Зберігаємо оголошення в MongoDB"""
+        try:
+            # Додаємо мета-дані
+            listing_data['parsed_at'] = datetime.now().isoformat()
+            listing_data['source'] = 'M2BOMBER'
+            listing_data['is_active'] = True
+            
+            # Зберігаємо в базу
+            result_id = self.db.parsed_listings.create(listing_data)
+            
+            if result_id:
+                self.logger.info(f"💾 Збережено в MongoDB: {listing_data.get('title', 'Без назви')}")
+                return result_id
+            else:
+                self.logger.error("Помилка збереження в базу")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Помилка збереження в MongoDB: {e}")
             return None
 
     def extract_listing_urls(self, html_content):
@@ -441,8 +457,13 @@ class M2BomberParser:
                     listing_data = await self.extract_listing_data(listing_page, listing_url)
                     listing_data['property_type'] = property_type
                     
-                    # Зберігаємо індивідуальний файл
-                    self.save_individual_listing(listing_data)
+                    # Перевіряємо чи оголошення вже існує в базі
+                    if self.check_listing_exists(listing_url):
+                        self.logger.info(f"🔄 Оголошення {listing_url} вже існує в базі")
+                        continue
+                    
+                    # Зберігаємо в базу
+                    self.save_to_database(listing_data)
                     
                     parsed_listings.append(listing_data)
                     

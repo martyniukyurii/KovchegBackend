@@ -1,264 +1,237 @@
 import asyncio
 import json
-import os
-import time
+import signal
 import sys
-from datetime import datetime
 from pathlib import Path
+from datetime import datetime, time
+from typing import List, Dict
+import os
+from dotenv import load_dotenv
 
-# Додаємо tools до Python path для логера
+# Завантажуємо змінні середовища
+load_dotenv()
+
+# Додаємо tools до Python path для логера та бази
 sys.path.append(str(Path(__file__).parent.parent / "tools"))
 from logger import Logger
+from database import SyncDatabase
 
+# Імпортуємо парсери та Telegram бота
 from parsers.olx_parser import OLXParser
 from parsers.m2bomber_parser import M2BomberParser
+from telegram_bot import TelegramBot
 
 class PropertyParserManager:
     def __init__(self):
-        self.project_root = Path(__file__).parent.parent
-        self.links_file = Path(__file__).parent / "links_data.json"  # Використовуємо новий файл в system
-        self.results_dir = self.project_root / "parsed_results"
-        
-        # Ініціалізуємо логер
         self.logger = Logger()
+        self.db = SyncDatabase()
+        self.telegram_bot = TelegramBot()
+        self.is_running = True
         
-        # Створюємо папку для результатів якщо її немає
-        self.results_dir.mkdir(exist_ok=True)
+        # Налаштування розкладу (не працювати з 2:00 до 7:00)
+        self.quiet_start = time(2, 0)  # 2:00
+        self.quiet_end = time(7, 0)    # 7:00
         
-        self.logger.info(f"Ініціалізовано PropertyParserManager")
-        self.logger.info(f"Файл посилань: {self.links_file}")
-        self.logger.info(f"Папка результатів: {self.results_dir}")
+        # Завантажуємо дані посилань
+        self.links_data = self.load_links_data()
         
-    def load_links_data(self):
-        """Завантажуємо дані з файлу посилань"""
+        # Обробка сигналів для graceful shutdown
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        
+    def signal_handler(self, signum, frame):
+        """Обробник сигналів для graceful shutdown"""
+        self.logger.info(f"🛑 Отримано сигнал {signum}. Завершуємо роботу...")
+        self.is_running = False
+        
+    def load_links_data(self) -> List[Dict]:
+        """Завантажуємо дані посилань з JSON файлу"""
         try:
-            with open(self.links_file, 'r', encoding='utf-8') as f:
+            links_file = Path(__file__).parent / "links_data.json"
+            with open(links_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                self.logger.info(f"Завантажено {len(data)} посилань з файлу")
-                return data
+            self.logger.info(f"📁 Завантажено {len(data)} посилань")
+            return data
         except Exception as e:
-            self.logger.error(f"Помилка при завантаженні файлу посилань: {e}")
+            self.logger.error(f"❌ Помилка завантаження посилань: {e}")
             return []
-            
-    def save_results(self, results, parser_name):
-        """Зберігаємо результати парсингу"""
-        if not results:
-            self.logger.warning(f"Немає результатів для збереження для {parser_name}")
-            return None
-            
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{parser_name}_results_{timestamp}.json"
-        filepath = self.results_dir / filename
+    
+    def is_quiet_time(self) -> bool:
+        """Перевіряємо чи зараз тихий час (2:00-7:00)"""
+        current_time = datetime.now().time()
+        return self.quiet_start <= current_time <= self.quiet_end
+    
+    async def run_olx_parser(self) -> Dict:
+        """Запуск OLX парсера"""
+        self.logger.info("🚀 Запуск OLX парсера...")
         
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(results, f, ensure_ascii=False, indent=2)
-            self.logger.info(f"Результати збережено в {filepath}")
-            self.logger.info(f"Всього оброблено: {len(results)} оголошень")
-            return filepath
-        except Exception as e:
-            self.logger.error(f"Помилка при збереженні результатів: {e}")
-            return None
-            
-    async def run_olx_parser(self):
-        """Запускаємо OLX парсер"""
-        self.logger.info("=" * 60)
-        self.logger.info(f"Запуск OLX парсера - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        self.logger.info("=" * 60)
-        
-        # Завантажуємо посилання
-        links_data = self.load_links_data()
-        if not links_data:
-            self.logger.warning("Немає даних для парсингу")
-            return []
-            
-        # Ініціалізуємо парсер
-        parser = OLXParser()
-        
-        try:
-            # Ініціалізуємо браузер
+            parser = OLXParser()
             await parser.init_browser()
             
-            # Запускаємо парсинг
-            results = await parser.parse_all_olx_urls(links_data)
+            # Фільтруємо OLX посилання
+            olx_links = [link for link in self.links_data if link.get('site') == 'OLX']
             
-            # Зберігаємо результати
-            if results:
-                self.save_results(results, "olx")
-                self.print_parsing_summary(results)
-            else:
-                self.logger.warning("Не вдалося отримати жодного результату")
-                
-            return results
+            results = await parser.parse_all_olx_urls(olx_links)
             
-        except Exception as e:
-            self.logger.error(f"Помилка при роботі OLX парсера: {e}")
-            return []
-        finally:
-            # Закриваємо браузер
             await parser.close_browser()
             
-    def print_parsing_summary(self, results):
-        """Виводимо короткий звіт про парсинг"""
-        self.logger.info("\n" + "=" * 60)
-        self.logger.info("ЗВІТ ПРО ПАРСИНГ")
-        self.logger.info("=" * 60)
-        
-        total = len(results)
-        self.logger.info(f"Всього оброблено оголошень: {total}")
-        
-        if total == 0:
-            return
+            # Відправляємо в Telegram канали
+            for result in results:
+                try:
+                    await self.telegram_bot.send_to_channel(result)
+                    await asyncio.sleep(1)  # Пауза між повідомленнями
+                except Exception as e:
+                    self.logger.error(f"Помилка відправки в Telegram: {e}")
             
-        # Статистика по типах нерухомості
-        property_types = {}
-        prices = []
-        with_phone = 0
-        with_location = 0
-        
-        for result in results:
-            # Типи нерухомості
-            prop_type = result.get('property_type', 'unknown')
-            property_types[prop_type] = property_types.get(prop_type, 0) + 1
-            
-            # Ціни
-            if result.get('price'):
-                prices.append(result['price'])
-                
-            # Статистика телефонів та локацій
-            if result.get('phone'):
-                with_phone += 1
-            if result.get('location'):
-                with_location += 1
-                
-        self.logger.info(f"\nПо типах нерухомості:")
-        for prop_type, count in property_types.items():
-            self.logger.info(f"  {prop_type}: {count}")
-            
-        self.logger.info(f"\nСтатистика:")
-        self.logger.info(f"  З вказаною ціною: {len(prices)} ({len(prices)/total*100:.1f}%)")
-        self.logger.info(f"  З номером телефону: {with_phone} ({with_phone/total*100:.1f}%)")
-        self.logger.info(f"  З визначеною локацією: {with_location} ({with_location/total*100:.1f}%)")
-        
-        if prices:
-            avg_price = sum(prices) / len(prices)
-            min_price = min(prices)
-            max_price = max(prices)
-            self.logger.info(f"  Середня ціна: ${avg_price:,.0f}")
-            self.logger.info(f"  Мін ціна: ${min_price:,.0f}")
-            self.logger.info(f"  Макс ціна: ${max_price:,.0f}")
-            
-        self.logger.info("=" * 60)
-        
-    async def run_m2bomber_parser(self):
-        """Запускаємо M2Bomber парсер"""
-        self.logger.info("=" * 60)
-        self.logger.info(f"Запуск M2Bomber парсера - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        self.logger.info("=" * 60)
-        
-        # Завантажуємо посилання
-        links_data = self.load_links_data()
-        if not links_data:
-            self.logger.warning("Немає даних для парсингу")
-            return []
-            
-        # Ініціалізуємо парсер
-        parser = M2BomberParser()
-        
-        try:
-            # Запускаємо парсинг
-            results = await parser.parse_all_m2bomber_urls(links_data)
-            
-            # Зберігаємо результати
-            if results:
-                self.save_results(results, "m2bomber")
-                self.print_parsing_summary(results)
-            else:
-                self.logger.warning("Не вдалося отримати жодного результату")
-                
-            return results
+            return {
+                'parser': 'OLX',
+                'processed': len(results),
+                'success': True,
+                'timestamp': datetime.now().isoformat()
+            }
             
         except Exception as e:
-            self.logger.error(f"Помилка при роботі M2Bomber парсера: {e}")
-            return []
-        finally:
-            # Парсер сам закриває браузер
-            pass
+            self.logger.error(f"❌ Помилка OLX парсера: {e}")
+            return {
+                'parser': 'OLX',
+                'processed': 0,
+                'success': False,
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+    
+    async def run_m2bomber_parser(self) -> Dict:
+        """Запуск M2Bomber парсера"""
+        self.logger.info("🚀 Запуск M2Bomber парсера...")
+        
+        try:
+            parser = M2BomberParser()
             
-    async def run_single_cycle(self):
-        """Виконуємо один цикл парсингу всіх сайтів"""
-        start_time = time.time()
+            # Фільтруємо M2BOMBER посилання
+            m2bomber_links = [link for link in self.links_data if link.get('site') == 'M2BOMBER']
+            
+            results = await parser.parse_all_m2bomber_urls(m2bomber_links)
+            
+            # Відправляємо в Telegram канали
+            for result in results:
+                try:
+                    await self.telegram_bot.send_to_channel(result)
+                    await asyncio.sleep(1)  # Пауза між повідомленнями
+                except Exception as e:
+                    self.logger.error(f"Помилка відправки в Telegram: {e}")
+            
+            return {
+                'parser': 'M2BOMBER',
+                'processed': len(results),
+                'success': True,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Помилка M2Bomber парсера: {e}")
+            return {
+                'parser': 'M2BOMBER',
+                'processed': 0,
+                'success': False,
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+    
+    async def run_single_cycle(self) -> Dict:
+        """Запуск одного циклу парсингу"""
+        cycle_start = datetime.now()
+        self.logger.info(f"🔄 Початок циклу парсингу: {cycle_start.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # Запускаємо OLX парсер
-        olx_results = await self.run_olx_parser()
+        # Перевіряємо тихий час
+        if self.is_quiet_time():
+            self.logger.info("😴 Тихий час (2:00-7:00). Пропускаємо цикл.")
+            return {
+                'cycle_start': cycle_start.isoformat(),
+                'skipped': True,
+                'reason': 'quiet_time',
+                'duration': 0
+            }
         
-        # Запускаємо M2Bomber парсер
-        m2bomber_results = await self.run_m2bomber_parser()
+        results = []
         
-        end_time = time.time()
-        duration = end_time - start_time
+        # Запускаємо парсери паралельно
+        try:
+            olx_task = asyncio.create_task(self.run_olx_parser())
+            m2bomber_task = asyncio.create_task(self.run_m2bomber_parser())
+            
+            olx_result, m2bomber_result = await asyncio.gather(olx_task, m2bomber_task)
+            
+            results = [olx_result, m2bomber_result]
+            
+        except Exception as e:
+            self.logger.error(f"❌ Помилка під час виконання циклу: {e}")
+            results = []
         
-        self.logger.info(f"\nЦикл парсингу завершено за {duration:.1f} секунд")
-        self.logger.info(f"Наступний запуск через 5 хвилин...")
+        cycle_end = datetime.now()
+        duration = (cycle_end - cycle_start).total_seconds()
+        
+        # Статистика
+        total_processed = sum(r.get('processed', 0) for r in results)
+        successful_parsers = sum(1 for r in results if r.get('success', False))
+        
+        self.logger.info(f"✅ Цикл завершено за {duration:.1f}с. Оброблено: {total_processed}, успішних парсерів: {successful_parsers}/2")
         
         return {
-            'olx_results': olx_results,
-            'm2bomber_results': m2bomber_results,
+            'cycle_start': cycle_start.isoformat(),
+            'cycle_end': cycle_end.isoformat(),
             'duration': duration,
-            'timestamp': datetime.now().isoformat()
+            'results': results,
+            'total_processed': total_processed,
+            'successful_parsers': successful_parsers,
+            'skipped': False
         }
-        
+    
     async def run_continuous(self):
-        """Запускаємо парсери кожні 5 хвилин"""
-        self.logger.info("Запуск системи парсингу нерухомості")
-        self.logger.info("Парсери будуть запускатися кожні 5 хвилин")
-        self.logger.info("Для зупинки натисніть Ctrl+C")
-        self.logger.info("-" * 60)
+        """Безперервний запуск парсерів кожні 5 хвилин"""
+        self.logger.info("🚀 Запуск системи парсингу нерухомості")
+        self.logger.info(f"📋 Завантажено {len(self.links_data)} посилань")
+        self.logger.info("⏰ Парсери будуть запускатися кожні 5 хвилин")
+        self.logger.info("😴 Тихий час: 2:00-7:00 (парсери не працюють)")
+        self.logger.info("🛑 Для зупинки натисніть Ctrl+C")
         
         cycle_count = 0
         
-        try:
-            while True:
+        while self.is_running:
+            try:
                 cycle_count += 1
-                self.logger.info(f"\n🔄 ЦИКЛ #{cycle_count}")
+                self.logger.info(f"📊 Цикл #{cycle_count}")
                 
-                # Запускаємо один цикл парсингу
-                await self.run_single_cycle()
+                # Запускаємо один цикл
+                cycle_result = await self.run_single_cycle()
                 
-                # Чекаємо 5 хвилин (300 секунд)
-                await asyncio.sleep(300)
+                # Очікуємо 5 хвилин до наступного циклу
+                if self.is_running:
+                    self.logger.info("⏳ Очікування 5 хвилин до наступного циклу...")
+                    for i in range(300):  # 300 секунд = 5 хвилин
+                        if not self.is_running:
+                            break
+                        await asyncio.sleep(1)
                 
-        except KeyboardInterrupt:
-            self.logger.info("\n\n⏹️  Зупинка системи парсингу...")
-            self.logger.info("Дякую за використання!")
-        except Exception as e:
-            self.logger.error(f"\n❌ Критична помилка: {e}")
-            self.logger.error("Система зупиняється...")
+            except Exception as e:
+                self.logger.error(f"❌ Критична помилка в головному циклі: {e}")
+                if self.is_running:
+                    self.logger.info("⏳ Очікування 30 секунд перед повторною спробою...")
+                    await asyncio.sleep(30)
+        
+        # Закриваємо Telegram бота
+        await self.telegram_bot.close()
+        self.logger.info("👋 Система парсингу зупинена")
 
 async def main():
     """Головна функція"""
-    # Ініціалізуємо менеджер (логер буде створений в __init__)
-    manager = PropertyParserManager()
-    
-    if not manager.links_file.exists():
-        manager.logger.error(f"❌ Файл посилань не знайдено: {manager.links_file}")
-        manager.logger.error("Переконайтеся, що файл існує та містить валідний JSON")
-        return
-        
-    # Перевіряємо наявність OpenAI ключа
-    if not os.getenv('OPENAI_API_KEY'):
-        manager.logger.warning("⚠️  OPENAI_API_KEY не знайдено в environment variables")
-        manager.logger.warning("Локацію буде визначено без OpenAI")
-        
-    manager.logger.info("✅ Ініціалізація завершена успішно")
-    
-    # Запускаємо систему
-    await manager.run_continuous()
+    try:
+        manager = PropertyParserManager()
+        await manager.run_continuous()
+    except KeyboardInterrupt:
+        print("\n🛑 Зупинка системи...")
+    except Exception as e:
+        print(f"❌ Критична помилка: {e}")
 
 if __name__ == "__main__":
-    # Встановлюємо event loop policy для Windows якщо потрібно
-    if os.name == 'nt':  # Windows
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-        
-    # Запускаємо головну функцію
     asyncio.run(main())

@@ -15,15 +15,17 @@ import requests
 # Завантажуємо змінні середовища з .env файлу
 load_dotenv()
 
-# Додаємо tools до Python path для логера
+# Додаємо tools до Python path для логера та бази
 sys.path.append(str(Path(__file__).parent.parent.parent / "tools"))
 from logger import Logger
+from database import SyncDatabase
 
 class OLXParser:
     def __init__(self):
         self.browser = None
         self.page = None
         self.logger = Logger()
+        self.db = SyncDatabase()
         # Ініціалізуємо OpenAI клієнт з ключем з env
         openai.api_key = os.getenv('OPENAI_API_KEY')
         
@@ -44,31 +46,36 @@ class OLXParser:
         if self.browser:
             await self.browser.close()
             
-    async def save_single_listing(self, listing_data: Dict):
-        """Зберігаємо одне оголошення в окремий файл"""
+    def check_listing_exists(self, url: str) -> bool:
+        """Перевіряємо чи існує оголошення в базі"""
         try:
-            from pathlib import Path
-            import json
-            from datetime import datetime
-            
-            # Створюємо папку для індивідуальних файлів
-            results_dir = Path(__file__).parent.parent.parent / "parsed_results" / "individual"
-            results_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Генеруємо унікальне ім'я файлу
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # мілісекунди
-            property_type = listing_data.get('property_type', 'unknown')
-            filename = f"{property_type}_{timestamp}.json"
-            filepath = results_dir / filename
-            
-            # Зберігаємо файл
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(listing_data, f, ensure_ascii=False, indent=2)
-                
-            self.logger.info(f"✅ Збережено: {filename}")
-            
+            existing = self.db.parsed_listings.find_one({"url": url})
+            return existing is not None
         except Exception as e:
-            self.logger.error(f"Помилка при збереженні оголошення: {e}")
+            self.logger.error(f"Помилка перевірки існування оголошення: {e}")
+            return False
+    
+    def save_to_database(self, listing_data: Dict) -> Optional[str]:
+        """Зберігаємо оголошення в MongoDB"""
+        try:
+            # Додаємо мета-дані
+            listing_data['parsed_at'] = datetime.now().isoformat()
+            listing_data['source'] = 'OLX'
+            listing_data['is_active'] = True
+            
+            # Зберігаємо в базу
+            result_id = self.db.parsed_listings.create(listing_data)
+            
+            if result_id:
+                self.logger.info(f"💾 Збережено в MongoDB: {listing_data.get('title', 'Без назви')}")
+                return result_id
+            else:
+                self.logger.error("Помилка збереження в базу")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Помилка збереження в MongoDB: {e}")
+            return None
             
     async def get_exchange_rates(self) -> Dict[str, float]:
         """Отримуємо актуальні курси валют з API НБУ кожен раз"""
@@ -645,18 +652,31 @@ class OLXParser:
             self.logger.info(f"Знайдено {len(listing_urls)} оголошень на сторінці {list_url}")
             
             results = []
-            for url in listing_urls[:3]:  # Обмежуємо кількість для швидкого тестування
-                self.logger.info(f"Парсимо оголошення: {url}")
+            processed = 0
+            skipped = 0
+            
+            for url in listing_urls[:20]:  # Збільшуємо до 20 оголошень
+                # Перевіряємо чи існує вже в базі
+                if self.check_listing_exists(url):
+                    self.logger.info(f"⏭️ Пропускаємо (вже існує): {url}")
+                    skipped += 1
+                    continue
+                
+                self.logger.info(f"📄 Парсимо оголошення {processed + 1}: {url}")
                 listing_data = await self.extract_listing_data(url)
                 if listing_data:
                     listing_data['property_type'] = property_type
-                    results.append(listing_data)
-                    # Зберігаємо одразу в окремий файл
-                    await self.save_single_listing(listing_data)
+                    
+                    # Зберігаємо в базу
+                    saved_id = self.save_to_database(listing_data)
+                    if saved_id:
+                        results.append(listing_data)
+                        processed += 1
                     
                 # Невелика пауза між запитами
                 await asyncio.sleep(1)
-                
+            
+            self.logger.info(f"✅ Оброблено: {processed}, пропущено: {skipped}")
             return results
             
         except Exception as e:
