@@ -15,10 +15,11 @@ import requests
 # Завантажуємо змінні середовища з .env файлу
 load_dotenv()
 
-# Додаємо tools до Python path для логера та бази
-sys.path.append(str(Path(__file__).parent.parent.parent / "tools"))
-from logger import Logger
-from database import SyncDatabase
+# Додаємо кореневу директорію до Python path
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from tools.logger import Logger
+from tools.database import SyncDatabase
+from bot.telegram_bot import TelegramBot
 
 class OLXParser:
     def __init__(self):
@@ -26,6 +27,7 @@ class OLXParser:
         self.page = None
         self.logger = Logger()
         self.db = SyncDatabase()
+        self.telegram_bot = TelegramBot()
         # Ініціалізуємо OpenAI клієнт з ключем з env
         openai.api_key = os.getenv('OPENAI_API_KEY')
         
@@ -42,9 +44,10 @@ class OLXParser:
         self.page.set_default_timeout(30000)
         
     async def close_browser(self):
-        """Закриття браузера"""
+        """Закриття браузера та Telegram бота"""
         if self.browser:
             await self.browser.close()
+        await self.telegram_bot.close()
             
     def check_listing_exists(self, url: str) -> bool:
         """Перевіряємо чи існує оголошення в базі"""
@@ -55,8 +58,8 @@ class OLXParser:
             self.logger.error(f"Помилка перевірки існування оголошення: {e}")
             return False
     
-    def save_to_database(self, listing_data: Dict) -> Optional[str]:
-        """Зберігаємо оголошення в MongoDB"""
+    async def save_to_database(self, listing_data: Dict) -> Optional[str]:
+        """Зберігаємо оголошення в MongoDB та відправляємо в Telegram"""
         try:
             # Додаємо мета-дані
             listing_data['parsed_at'] = datetime.now().isoformat()
@@ -68,6 +71,14 @@ class OLXParser:
             
             if result_id:
                 self.logger.info(f"💾 Збережено в MongoDB: {listing_data.get('title', 'Без назви')}")
+                
+                # Відправляємо в Telegram одразу після збереження
+                try:
+                    await self.telegram_bot.send_to_channel(listing_data)
+                    self.logger.info(f"📤 Відправлено в Telegram: {listing_data.get('title', 'Без назви')}")
+                except Exception as telegram_error:
+                    self.logger.error(f"❌ Помилка відправки в Telegram: {telegram_error}")
+                
                 return result_id
             else:
                 self.logger.error("Помилка збереження в базу")
@@ -667,8 +678,8 @@ class OLXParser:
                 if listing_data:
                     listing_data['property_type'] = property_type
                     
-                    # Зберігаємо в базу
-                    saved_id = self.save_to_database(listing_data)
+                    # Зберігаємо в базу та відправляємо в Telegram
+                    saved_id = await self.save_to_database(listing_data)
                     if saved_id:
                         results.append(listing_data)
                         processed += 1

@@ -14,10 +14,11 @@ from typing import Dict, Optional
 # Завантажуємо змінні середовища
 load_dotenv()
 
-# Додаємо tools до Python path для логера та бази
-sys.path.append(str(Path(__file__).parent.parent.parent / "tools"))
-from logger import Logger
-from database import SyncDatabase
+# Додаємо кореневу директорію до Python path
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from tools.logger import Logger
+from tools.database import SyncDatabase
+from bot.telegram_bot import TelegramBot
 
 class M2BomberParser:
     def __init__(self):
@@ -27,6 +28,7 @@ class M2BomberParser:
         self.exchange_rates = {}
         self.logger = Logger()
         self.db = SyncDatabase()
+        self.telegram_bot = TelegramBot()
         
         # Створюємо папку для індивідуальних результатів
         self.results_dir = Path(__file__).parent.parent.parent / "parsed_results" / "individual"
@@ -41,9 +43,10 @@ class M2BomberParser:
         )
         
     async def close_browser(self):
-        """Закриття браузера"""
+        """Закриття браузера та Telegram бота"""
         if self.browser:
             await self.browser.close()
+        await self.telegram_bot.close()
             
     async def get_exchange_rates(self):
         """Отримання курсів валют з НБУ"""
@@ -112,8 +115,8 @@ class M2BomberParser:
             self.logger.error(f"Помилка перевірки існування оголошення: {e}")
             return False
     
-    def save_to_database(self, listing_data: Dict) -> Optional[str]:
-        """Зберігаємо оголошення в MongoDB"""
+    async def save_to_database(self, listing_data: Dict) -> Optional[str]:
+        """Зберігаємо оголошення в MongoDB та відправляємо в Telegram"""
         try:
             # Додаємо мета-дані
             listing_data['parsed_at'] = datetime.now().isoformat()
@@ -125,6 +128,14 @@ class M2BomberParser:
             
             if result_id:
                 self.logger.info(f"💾 Збережено в MongoDB: {listing_data.get('title', 'Без назви')}")
+                
+                # Відправляємо в Telegram одразу після збереження
+                try:
+                    await self.telegram_bot.send_to_channel(listing_data)
+                    self.logger.info(f"📤 Відправлено в Telegram: {listing_data.get('title', 'Без назви')}")
+                except Exception as telegram_error:
+                    self.logger.error(f"❌ Помилка відправки в Telegram: {telegram_error}")
+                
                 return result_id
             else:
                 self.logger.error("Помилка збереження в базу")
@@ -462,8 +473,8 @@ class M2BomberParser:
                         self.logger.info(f"🔄 Оголошення {listing_url} вже існує в базі")
                         continue
                     
-                    # Зберігаємо в базу
-                    self.save_to_database(listing_data)
+                    # Зберігаємо в базу та відправляємо в Telegram
+                    await self.save_to_database(listing_data)
                     
                     parsed_listings.append(listing_data)
                     

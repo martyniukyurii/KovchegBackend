@@ -11,17 +11,16 @@ from dotenv import load_dotenv
 # Завантажуємо змінні середовища
 load_dotenv()
 
-# Додаємо tools до Python path для логера та бази
-sys.path.append(str(Path(__file__).parent.parent / "tools"))
-from logger import Logger
-from database import SyncDatabase
+# Додаємо кореневу директорію до Python path
+sys.path.append(str(Path(__file__).parent.parent))
+from tools.logger import Logger
+from tools.database import SyncDatabase
 
 # Імпортуємо парсери та Telegram бота
 from parsers.olx_parser import OLXParser
 from parsers.m2bomber_parser import M2BomberParser
 
-# Додаємо кореневу директорію до Python path та імпортуємо бота
-sys.path.append(str(Path(__file__).parent.parent))
+# Імпортуємо бота
 from bot.telegram_bot import TelegramBot
 
 class PropertyParserManager:
@@ -79,13 +78,7 @@ class PropertyParserManager:
             
             await parser.close_browser()
             
-            # Відправляємо в Telegram канали
-            for result in results:
-                try:
-                    await self.telegram_bot.send_to_channel(result)
-                    await asyncio.sleep(1)  # Пауза між повідомленнями
-                except Exception as e:
-                    self.logger.error(f"Помилка відправки в Telegram: {e}")
+            # Повідомлення вже відправлені в Telegram в парсері
             
             return {
                 'parser': 'OLX',
@@ -116,13 +109,7 @@ class PropertyParserManager:
             
             results = await parser.parse_all_m2bomber_urls(m2bomber_links)
             
-            # Відправляємо в Telegram канали
-            for result in results:
-                try:
-                    await self.telegram_bot.send_to_channel(result)
-                    await asyncio.sleep(1)  # Пауза між повідомленнями
-                except Exception as e:
-                    self.logger.error(f"Помилка відправки в Telegram: {e}")
+            # Повідомлення вже відправлені в Telegram в парсері
             
             return {
                 'parser': 'M2BOMBER',

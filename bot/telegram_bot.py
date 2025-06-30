@@ -1,18 +1,20 @@
 import asyncio
 import os
+import aiohttp
 from aiogram import Bot, types
-from aiogram.types import InputMediaPhoto
+from aiogram.types import InputMediaPhoto, InputFile
 from datetime import datetime
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
+import io
 
 # Завантажуємо змінні середовища
 load_dotenv()
 
-# Додаємо tools до Python path для логера
-sys.path.append(str(Path(__file__).parent.parent / "tools"))
-from logger import Logger
+# Додаємо кореневу директорію до Python path
+sys.path.append(str(Path(__file__).parent.parent))
+from tools.logger import Logger
 
 class TelegramBot:
     def __init__(self):
@@ -90,6 +92,69 @@ class TelegramBot:
         
         return message
     
+    def is_valid_image_url(self, url):
+        """Перевіряємо чи є URL зображення валідним"""
+        if not url or not isinstance(url, str):
+            return False
+        
+        # Перевіряємо чи починається з http/https
+        if not url.startswith(('http://', 'https://')):
+            return False
+            
+        url_lower = url.lower()
+        
+        # Перевіряємо чи закінчується на відоме розширення зображення
+        image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')
+        if any(ext in url_lower for ext in image_extensions):
+            return True
+        
+        # Перевіряємо відомі домени зображень та їх специфічні шляхи
+        if 'olxcdn.com' in url_lower and ('/image' in url_lower or '/files/' in url_lower):
+            return True
+            
+        if 'm2bomber.com' in url_lower and ('/storage/' in url_lower or '/images/' in url_lower):
+            return True
+            
+        if 'apollo-ireland.akamaized.net' in url_lower:
+            return True
+            
+        return False
+
+    async def download_image(self, url):
+        """Завантажуємо зображення для Telegram"""
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            
+            # Додаємо Referer для OLX
+            if 'olx' in url.lower():
+                headers['Referer'] = 'https://www.olx.ua/'
+            elif 'm2bomber' in url.lower():
+                headers['Referer'] = 'https://ua.m2bomber.com/'
+            
+            # Відключаємо SSL перевірку для проблемних сайтів
+            ssl = False if any(domain in url.lower() for domain in ['m2bomber.com', 'olxcdn.com']) else None
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=10, ssl=ssl) as response:
+                    if response.status == 200:
+                        content = await response.read()
+                        # Перевіряємо чи це дійсно зображення
+                        content_type = response.headers.get('content-type', '').lower()
+                        if content_type.startswith('image/'):
+                            return io.BytesIO(content)
+            return None
+        except Exception as e:
+            self.logger.warning(f"⚠️ Не вдалося завантажити зображення {url}: {e}")
+            return None
+
     async def send_to_channel(self, listing_data):
         """Відправка оголошення до відповідного каналу"""
         try:
@@ -104,35 +169,58 @@ class TelegramBot:
             # Форматуємо повідомлення
             message_text = self.format_listing_message(listing_data)
             
-            # Отримуємо зображення
+            # Отримуємо та фільтруємо зображення
             images = listing_data.get('images', [])
+            valid_images = [img for img in images if self.is_valid_image_url(img)][:10]  # Максимум 10 зображень
             
-            if images:
-                # Відправляємо з фото
-                if len(images) == 1:
-                    # Одне фото
-                    await self.bot.send_photo(
-                        chat_id=channel_id,
-                        photo=images[0],
-                        caption=message_text,
-                        parse_mode='HTML'
-                    )
-                else:
-                    # Кілька фото (до 10)
-                    media_group = []
-                    for i, image_url in enumerate(images[:10]):
-                        if i == 0:
-                            # Перше фото з підписом
-                            media_group.append(
-                                InputMediaPhoto(media=image_url, caption=message_text, parse_mode='HTML')
+            if valid_images:
+                try:
+                    # Завантажуємо зображення
+                    downloaded_images = []
+                    for i, image_url in enumerate(valid_images[:3]):  # Максимум 3 зображення для швидкості
+                        image_data = await self.download_image(image_url)
+                        if image_data:
+                            downloaded_images.append(image_data)
+                    
+                    if downloaded_images:
+                        # Відправляємо з завантаженими фото
+                        if len(downloaded_images) == 1:
+                            # Одне фото
+                            await self.bot.send_photo(
+                                chat_id=channel_id,
+                                photo=InputFile(downloaded_images[0]),
+                                caption=message_text,
+                                parse_mode='HTML'
                             )
                         else:
-                            # Інші фото без підпису
-                            media_group.append(InputMediaPhoto(media=image_url))
-                    
-                    await self.bot.send_media_group(
+                            # Кілька фото
+                            media_group = []
+                            for i, image_data in enumerate(downloaded_images):
+                                if i == 0:
+                                    # Перше фото з підписом
+                                    media_group.append(
+                                        InputMediaPhoto(media=InputFile(image_data), caption=message_text, parse_mode='HTML')
+                                    )
+                                else:
+                                    # Інші фото без підпису
+                                    media_group.append(InputMediaPhoto(media=InputFile(image_data)))
+                            
+                            await self.bot.send_media_group(
+                                chat_id=channel_id,
+                                media=media_group
+                            )
+                    else:
+                        # Якщо не вдалося завантажити жодне зображення
+                        raise Exception("Не вдалося завантажити зображення")
+                        
+                except Exception as photo_error:
+                    # Якщо помилка з фото, відправляємо без них
+                    self.logger.warning(f"⚠️ Помилка відправки фото: {photo_error}. Відправляємо без зображень.")
+                    await self.bot.send_message(
                         chat_id=channel_id,
-                        media=media_group
+                        text=message_text,
+                        parse_mode='HTML',
+                        disable_web_page_preview=False
                     )
             else:
                 # Відправляємо без фото
