@@ -19,7 +19,10 @@ from database import SyncDatabase
 # Імпортуємо парсери та Telegram бота
 from parsers.olx_parser import OLXParser
 from parsers.m2bomber_parser import M2BomberParser
-from telegram_bot import TelegramBot
+
+# Додаємо кореневу директорію до Python path та імпортуємо бота
+sys.path.append(str(Path(__file__).parent.parent))
+from bot.telegram_bot import TelegramBot
 
 class PropertyParserManager:
     def __init__(self):
