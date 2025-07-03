@@ -216,7 +216,7 @@ class Router:
         self.ai_assistant_router.post("/admin/bulk-generate-tasks", summary="Масове генерування задач для всіх агентів")(self.ai_assistant_handler.bulk_generate_daily_tasks)
         self.ai_assistant_router.delete("/admin/cleanup-expired-tasks", summary="Видалення застарілих задач (3+ місяці)")(self.ai_assistant_handler.cleanup_expired_tasks)
 
-        # Додаємо роутери в FastAPI додаток
+        # Додаємо роутери в FastAPI додаток без префіксу (nginx додасть /kovcheg/)
         self.app.include_router(self.auth_router)
         self.app.include_router(self.admin_auth_router)
         self.app.include_router(self.tg_auth_router)

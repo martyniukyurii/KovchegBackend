@@ -17,7 +17,7 @@ class CustomCorsMiddleware(BaseHTTPMiddleware):
                 content={},
                 status_code=200,
                 headers={
-                    "Access-Control-Allow-Origin": "https://www.kovcheg.cv.ua",
+                    "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Credentials": "true",
                     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
                     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
@@ -29,7 +29,7 @@ class CustomCorsMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         
         # Додаємо CORS заголовки до всіх відповідей
-        response.headers["Access-Control-Allow-Origin"] = "https://www.kovcheg.cv.ua"
+        response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
@@ -40,8 +40,8 @@ class CustomCorsMiddleware(BaseHTTPMiddleware):
 app = FastAPI(
     title="Kovcheg API",
     version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc"
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # Додаємо наш власний CORS middleware
@@ -50,7 +50,7 @@ app.add_middleware(CustomCorsMiddleware)
 # Додаємо стандартний CORS middleware як резервний варіант
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://www.kovcheg.cv.ua"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,14 +66,14 @@ async def startup_event():
 
 if __name__ == "__main__":
     print("🚀 Запуск Kovcheg API сервера...")
-    print("📍 Документація буде доступна за адресою: http://localhost:8000/api/docs")
-    print("🔍 Розумний пошук: http://localhost:8000/search/")
+    print("📍 Документація буде доступна за адресою: http://0.0.0.0:8001/api/docs")
+    print("🔍 Розумний пошук: http://0.0.0.0:8001/search/")
     
     import uvicorn
     uvicorn.run(
-        "api.main:app",
+        "main:app",
         host="0.0.0.0", 
-        port=8000, 
+        port=8001, 
         reload=True,
         log_level="info"
     )

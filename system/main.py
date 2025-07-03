@@ -2,31 +2,47 @@ import asyncio
 import json
 import signal
 import sys
+import os
 from pathlib import Path
 from datetime import datetime, time
 from typing import List, Dict
-import os
 from dotenv import load_dotenv
+
+# Налаштування для серверного середовища
+os.environ.setdefault('DISPLAY', ':99')
+os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', '/home/ubuntu/.cache/ms-playwright')
+
+if sys.platform.startswith('linux'):
+    import asyncio
+    # Встановлюємо event loop policy для Linux серверів
+    try:
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    except ImportError:
+        # Якщо uvloop недоступний, використовуємо стандартний
+        asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
 
 # Завантажуємо змінні середовища
 load_dotenv()
 
 # Додаємо кореневу директорію до Python path
 sys.path.append(str(Path(__file__).parent.parent))
+
+# Тепер імпортуємо все після налаштування path
 from tools.logger import Logger
 from tools.database import SyncDatabase
 
-# Імпортуємо парсери та Telegram бота
+# Імпортуємо парсери після налаштування path
 from parsers.olx_parser import OLXParser
 from parsers.m2bomber_parser import M2BomberParser
-
-# Імпортуємо бота
-from bot.telegram_bot import TelegramBot
 
 class PropertyParserManager:
     def __init__(self):
         self.logger = Logger()
         self.db = SyncDatabase()
+        
+        # Імпортуємо TelegramBot динамічно
+        from bot.telegram_bot import TelegramBot
         self.telegram_bot = TelegramBot()
         self.is_running = True
         
@@ -203,25 +219,19 @@ class PropertyParserManager:
                             break
                         await asyncio.sleep(1)
                 
+            except KeyboardInterrupt:
+                self.logger.info("🛑 Отримано сигнал зупинки")
+                self.is_running = False
             except Exception as e:
-                self.logger.error(f"❌ Критична помилка в головному циклі: {e}")
+                self.logger.error(f"❌ Неочікувана помилка: {e}")
                 if self.is_running:
-                    self.logger.info("⏳ Очікування 30 секунд перед повторною спробою...")
-                    await asyncio.sleep(30)
-        
-        # Закриваємо Telegram бота
-        await self.telegram_bot.close()
-        self.logger.info("👋 Система парсингу зупинена")
+                    self.logger.info("⏳ Очікування 1 хвилину перед повторною спробою...")
+                    await asyncio.sleep(60)
 
 async def main():
     """Головна функція"""
-    try:
-        manager = PropertyParserManager()
-        await manager.run_continuous()
-    except KeyboardInterrupt:
-        print("\n🛑 Зупинка системи...")
-    except Exception as e:
-        print(f"❌ Критична помилка: {e}")
+    manager = PropertyParserManager()
+    await manager.run_continuous()
 
 if __name__ == "__main__":
     asyncio.run(main())

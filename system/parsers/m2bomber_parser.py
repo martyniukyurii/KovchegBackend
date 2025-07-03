@@ -18,7 +18,6 @@ load_dotenv()
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from tools.logger import Logger
 from tools.database import SyncDatabase
-from bot.telegram_bot import TelegramBot
 
 class M2BomberParser:
     def __init__(self):
@@ -28,6 +27,9 @@ class M2BomberParser:
         self.exchange_rates = {}
         self.logger = Logger()
         self.db = SyncDatabase()
+        
+        # Імпортуємо TelegramBot динамічно
+        from bot.telegram_bot import TelegramBot
         self.telegram_bot = TelegramBot()
         
         # Створюємо папку для індивідуальних результатів
@@ -37,9 +39,23 @@ class M2BomberParser:
     async def init_browser(self):
         """Ініціалізація браузера Playwright"""
         playwright = await async_playwright().start()
-        self.browser = await playwright.chromium.launch(headless=True)
+        
+        # Використовуємо Firefox з додатковими налаштуваннями для серверного середовища
+        self.browser = await playwright.firefox.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor'
+            ]
+        )
+        
         self.context = await self.browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            user_agent='Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/119.0',
+            viewport={'width': 1920, 'height': 1080},
+            ignore_https_errors=True
         )
         
     async def close_browser(self):
@@ -457,33 +473,85 @@ class M2BomberParser:
             
             parsed_listings = []
             
+            # Перезапускаємо браузер кожні 10 оголошень для очистки пам'яті
+            browser_restart_interval = 10
+            
             for i, listing_url in enumerate(listing_urls[:20], 1):
-                try:
-                    self.logger.info(f"📄 Парсимо оголошення {i}/{len(listing_urls[:20])}: {listing_url}")
-                    
-                    listing_page = await self.context.new_page()
-                    await listing_page.goto(listing_url, wait_until='domcontentloaded', timeout=30000)
-                    await listing_page.wait_for_timeout(2000)
-                    
-                    listing_data = await self.extract_listing_data(listing_page, listing_url)
-                    listing_data['property_type'] = property_type
-                    
-                    # Перевіряємо чи оголошення вже існує в базі
-                    if self.check_listing_exists(listing_url):
-                        self.logger.info(f"🔄 Оголошення {listing_url} вже існує в базі")
-                        continue
-                    
-                    # Зберігаємо в базу та відправляємо в Telegram
-                    await self.save_to_database(listing_data)
-                    
-                    parsed_listings.append(listing_data)
-                    
-                    await listing_page.close()
-                    await asyncio.sleep(1)
-                    
-                except Exception as e:
-                    self.logger.error(f"Помилка парсингу оголошення {listing_url}: {e}")
+                # Перезапускаємо браузер періодично для очистки пам'яті
+                if i > 1 and (i - 1) % browser_restart_interval == 0:
+                    self.logger.info(f"🔄 Профілактичний перезапуск браузера після {i-1} оголошень...")
+                    try:
+                        await self.close_browser()
+                        await asyncio.sleep(3)
+                        await self.init_browser()
+                        self.logger.info("✅ Браузер перезапущено для очистки пам'яті")
+                    except Exception as e:
+                        self.logger.error(f"❌ Помилка профілактичного перезапуску: {e}")
+                
+                # Перевіряємо чи оголошення вже існує в базі СПОЧАТКУ
+                if self.check_listing_exists(listing_url):
+                    self.logger.info(f"⏭️ Пропускаємо (вже існує): {listing_url}")
                     continue
+                
+                self.logger.info(f"📄 Парсимо оголошення {i}/{len(listing_urls[:20])}: {listing_url}")
+                
+                # Додаємо обробку помилок браузера з повторними спробами
+                max_retries = 3
+                listing_page = None
+                
+                for attempt in range(max_retries):
+                    try:
+                        listing_page = await self.context.new_page()
+                        await listing_page.goto(listing_url, wait_until='domcontentloaded', timeout=30000)
+                        await listing_page.wait_for_timeout(2000)
+                        
+                        listing_data = await self.extract_listing_data(listing_page, listing_url)
+                        listing_data['property_type'] = property_type
+                        
+                        # Зберігаємо в базу та відправляємо в Telegram
+                        await self.save_to_database(listing_data)
+                        
+                        parsed_listings.append(listing_data)
+                        
+                        await listing_page.close()
+                        listing_page = None
+                        break  # Успішно - виходимо з циклу повторів
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        self.logger.error(f"❌ Помилка парсингу {listing_url} (спроба {attempt + 1}/{max_retries}): {error_msg}")
+                        
+                        # Закриваємо сторінку якщо вона відкрита
+                        if listing_page:
+                            try:
+                                await listing_page.close()
+                            except:
+                                pass
+                            listing_page = None
+                        
+                        # Перевіряємо чи це помилка пам'яті або браузера
+                        memory_errors = ["collected to prevent unbounded heap growth", "object has been collected"]
+                        browser_errors = ["playwright", "connection", "_object"]
+                        
+                        is_memory_error = any(err in error_msg.lower() for err in memory_errors)
+                        is_browser_error = any(err in error_msg.lower() for err in browser_errors)
+                        
+                        if is_memory_error or is_browser_error:
+                            self.logger.warning("🔄 Перезапускаємо браузер через помилку пам'яті/браузера...")
+                            try:
+                                await self.close_browser()
+                                await asyncio.sleep(3)
+                                await self.init_browser()
+                                self.logger.info("✅ Браузер перезапущено")
+                            except Exception as browser_error:
+                                self.logger.error(f"❌ Помилка перезапуску браузера: {browser_error}")
+                        
+                        if attempt == max_retries - 1:
+                            self.logger.error(f"💥 Не вдалося спарсити {listing_url} після {max_retries} спроб")
+                        else:
+                            await asyncio.sleep(3)  # Пауза перед повтором
+                
+                await asyncio.sleep(1)
             
             await page.close()
             return parsed_listings
