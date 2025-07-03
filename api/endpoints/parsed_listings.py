@@ -6,6 +6,27 @@ from tools.database import Database
 from tools.event_logger import EventLogger
 from datetime import datetime
 from api.jwt_handler import JWTHandler
+from bson import ObjectId
+
+
+def convert_mongo_document(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Конвертує MongoDB документ в JSON-сумісний формат"""
+    if not doc:
+        return doc
+    
+    for key, value in doc.items():
+        if isinstance(value, ObjectId):
+            doc[key] = str(value)
+        elif isinstance(value, datetime):
+            doc[key] = value.isoformat()
+        elif isinstance(value, dict):
+            doc[key] = convert_mongo_document(value)
+        elif isinstance(value, list):
+            doc[key] = [convert_mongo_document(item) if isinstance(item, dict) else 
+                       str(item) if isinstance(item, ObjectId) else 
+                       item.isoformat() if isinstance(item, datetime) else item 
+                       for item in value]
+    return doc
 
 
 class ParsedListingsEndpoints:
@@ -34,18 +55,20 @@ class ParsedListingsEndpoints:
         limit: int = Query(10, ge=1, le=50)
     ) -> Dict[str, Any]:
         """
-        Отримати спарсені оголошення з фільтрами та сортуванням (потребує авторизації).
+        Отримати список спарсених оголошень з фільтрацією та пагінацією (потребує авторизації).
         
-        Доступні фільтри:
+        Параметри:
         - source: джерело парсингу (OLX, M2BOMBER)
         - status_filter: статус оголошення (new, processed, converted)
         - property_type: тип нерухомості (commerce, orenda, prodazh, zemlya)
-        - min_price/max_price: ціновий діапазон
+        - min_price, max_price: ціновий діапазон
         - currency: валюта (UAH, USD, EUR)
-        - min_area/max_area: діапазон площі
-        - min_rooms/max_rooms: діапазон кількості кімнат
-        - city: пошук по місту
+        - min_area, max_area: діапазон площі
+        - min_rooms, max_rooms: діапазон кімнат
+        - city: місто
         - search_text: пошук по тексту в назві та описі
+        - page: номер сторінки
+        - limit: кількість результатів на сторінку
         - sort_by: поле для сортування (parsed_at, price, area, rooms, created_at)
         - sort_order: порядок сортування (asc, desc)
         """
@@ -123,8 +146,11 @@ class ParsedListingsEndpoints:
                 sort=[(sort_field, sort_direction)]
             )
             
+            # Конвертація MongoDB об'єктів для JSON серіалізації
+            listings = [convert_mongo_document(listing) for listing in listings]
+            
             # Підрахунок загальної кількості
-            total = await self.db.parsed_listings.count(filters)
+            total = await self.db.parsed_listings.count_documents(filters)
             
             return Response.success({
                 "listings": listings,
@@ -647,7 +673,7 @@ class ParsedListingsEndpoints:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
             # Загальна кількість оголошень
-            total_listings = await self.db.parsed_listings.count({})
+            total_listings = await self.db.parsed_listings.count_documents({})
             
             # Статистика по джерелам
             sources_stats = await self.db.parsed_listings.aggregate([
