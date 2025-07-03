@@ -41,7 +41,8 @@ app = FastAPI(
     title="Kovcheg API",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
 )
 
 # Додаємо наш власний CORS middleware
@@ -66,14 +67,14 @@ async def startup_event():
 
 if __name__ == "__main__":
     print("🚀 Запуск Kovcheg API сервера...")
-    print("📍 Документація буде доступна за адресою: http://0.0.0.0:8001/api/docs")
-    print("🔍 Розумний пошук: http://0.0.0.0:8001/search/")
+    print("📍 Документація буде доступна за адресою: http://0.0.0.0:8002/docs")
+    print("🔍 Розумний пошук: http://0.0.0.0:8002/search/")
     
     import uvicorn
     uvicorn.run(
         "main:app",
         host="0.0.0.0", 
-        port=8001, 
+        port=8002, 
         reload=True,
         log_level="info"
     )
