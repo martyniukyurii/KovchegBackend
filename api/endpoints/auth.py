@@ -4,10 +4,13 @@ from api.response import Response
 from api.exceptions.auth_exceptions import AuthException, AuthErrorCode
 from tools.database import Database
 from tools.event_logger import EventLogger
+from tools.email_service import EmailService
+from tools.oauth2_service import OAuth2Service
 from datetime import datetime, timedelta
 import bcrypt
 import secrets
 import uuid
+from bson import ObjectId
 from api.jwt_handler import JWTHandler
 
 
@@ -15,10 +18,20 @@ class AuthEndpoints:
     def __init__(self):
         self.db = Database()
         self.jwt_handler = JWTHandler()
+        self.email_service = EmailService()
+        self.oauth2_service = OAuth2Service()
 
     async def register(self, request: Request) -> Dict[str, Any]:
         """
         Реєстрація нового користувача.
+        
+        Параметри:
+        - email: обов'язковий
+        - password: обов'язковий
+        - first_name: обов'язковий
+        - last_name: обов'язковий
+        - phone: опціональний
+        - language: опціональний (uk, ru, en), за замовчуванням uk
         """
         try:
             data = await request.json()
@@ -27,6 +40,7 @@ class AuthEndpoints:
             first_name = data.get("first_name", "")
             last_name = data.get("last_name", "")
             phone = data.get("phone", "")
+            language = data.get("language", "uk")  # Мова для неавторизованого користувача
             
             # Перевірка наявності обов'язкових полів
             if not email or not password or not first_name or not last_name:
@@ -41,7 +55,7 @@ class AuthEndpoints:
             hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             
             # Створення коду верифікації
-            verification_code = str(uuid.uuid4())
+            verification_code = str(secrets.randbelow(900000) + 100000)
             
             # Створення нового користувача
             user_data = {
@@ -52,13 +66,29 @@ class AuthEndpoints:
                 "login": email,  # За замовчуванням логін = email
                 "password": hashed_password,
                 "created_at": datetime.utcnow(),
-                "language_code": "uk",
+                "updated_at": datetime.utcnow(),
+                "language_code": language,
                 "is_verified": False,
+                "user_type": "client",  # client, agent, admin
                 "favorites": [],
                 "search_history": [],
                 "notifications_settings": {
                     "telegram": True,
                     "email": True
+                },
+                # Клієнтські поля
+                "client_status": "active",  # active, inactive, lead
+                "assigned_agent_id": None,
+                "client_interests": [],
+                "client_budget": {},
+                "client_preferred_locations": [],
+                "client_notes": "",
+                "client_source": "self_registered",
+                "client_preferences": {
+                    "property_type": [],
+                    "price_range": {},
+                    "location": [],
+                    "features": []
                 }
             }
             
@@ -74,7 +104,13 @@ class AuthEndpoints:
             }
             await self.db.verification_codes.create(verification_data)
             
-            # TODO: Відправка email з кодом верифікації
+            # Відправка email з кодом верифікації
+            await self.email_service.send_verification_email(
+                email=email,
+                verification_code=verification_code,
+                user_name=f"{first_name} {last_name}",
+                language=language
+            )
             
             # Логування події
             event_logger = EventLogger()
@@ -124,10 +160,19 @@ class AuthEndpoints:
                 raise AuthException(AuthErrorCode.INVALID_VERIFICATION_CODE)
             
             # Оновлення статусу користувача
-            await self.db.users.update({"_id": verification["user_id"]}, {"is_verified": True})
+            await self.db.users.update({"_id": ObjectId(verification["user_id"])}, {"$set": {"is_verified": True}})
             
             # Видалення коду верифікації
             await self.db.verification_codes.delete({"code": code})
+            
+            # Відправка привітального email
+            user = await self.db.users.find_one({"_id": ObjectId(verification["user_id"])})
+            if user:
+                await self.email_service.send_welcome_email(
+                    email=user["email"],
+                    user_name=f"{user['first_name']} {user['last_name']}",
+                    language=user.get("language_code", "uk")
+                )
             
             # Логування події
             event_logger = EventLogger({"_id": verification["user_id"]})
@@ -168,6 +213,13 @@ class AuthEndpoints:
             if not user:
                 raise AuthException(AuthErrorCode.INVALID_CREDENTIALS)
             
+            # Перевірка чи користувач має пароль (не OAuth2)
+            if user.get("password") is None:
+                return Response.error(
+                    "Цей акаунт створено через соціальну мережу. Використовуйте вхід через Google або Apple.",
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+            
             # Перевірка пароля
             if not bcrypt.checkpw(password.encode('utf-8'), user["password"].encode('utf-8')):
                 raise AuthException(AuthErrorCode.INVALID_CREDENTIALS)
@@ -189,7 +241,7 @@ class AuthEndpoints:
             
             # Підготовка даних користувача для відповіді
             user_data = {
-                "id": user["_id"],
+                "id": str(user["_id"]),
                 "email": user["email"],
                 "first_name": user["first_name"],
                 "last_name": user["last_name"],
@@ -218,71 +270,122 @@ class AuthEndpoints:
 
     async def login_oauth2(self, request: Request) -> Dict[str, Any]:
         """
-        Вхід користувача через OAuth2 (Gmail, Apple).
+        Вхід користувача через OAuth2 (Google, Apple).
+        
+        Параметри:
+        - provider: обов'язковий (google, apple)
+        - token: обов'язковий (для прямого токена) або code + redirect_uri (для коду авторизації)
+        - code: код авторизації (альтернатива токену)
+        - redirect_uri: URI перенаправлення (потрібен для коду)
+        - language: опціональний (uk, ru, en), за замовчуванням uk
         """
         try:
             data = await request.json()
             provider = data.get("provider", "")
             token = data.get("token", "")
+            code = data.get("code", "")
+            redirect_uri = data.get("redirect_uri", "")
+            language = data.get("language", "uk")  # Мова для неавторизованого користувача
             
-            if not provider or not token:
-                return Response.error("Провайдер та токен обов'язкові", status_code=status.HTTP_400_BAD_REQUEST)
+            if not provider:
+                return Response.error("Провайдер обов'язковий", status_code=status.HTTP_400_BAD_REQUEST)
             
-            if provider not in ["gmail", "apple"]:
+            if not token and not code:
+                return Response.error("Токен або код авторизації обов'язкові", status_code=status.HTTP_400_BAD_REQUEST)
+            
+            if code and not redirect_uri:
+                return Response.error("Для коду авторизації потрібен redirect_uri", status_code=status.HTTP_400_BAD_REQUEST)
+            
+            if provider not in ["google", "apple"]:
                 return Response.error("Непідтримуваний провайдер", status_code=status.HTTP_400_BAD_REQUEST)
             
-            # TODO: Реалізувати валідацію OAuth2 токенів
-            # Тут буде код для перевірки токена через API провайдера
-            # і отримання даних користувача
+            # Якщо передано код, спочатку обміняємо його на токен
+            if code and provider == "google":
+                token = await self.oauth2_service.exchange_google_code_for_token(code, redirect_uri)
+                if not token:
+                    return Response.error("Невірний код авторизації", status_code=status.HTTP_401_UNAUTHORIZED)
             
-            # Заглушка для демонстрації
-            oauth_user_info = {
-                "email": "user@example.com",
-                "first_name": "John",
-                "last_name": "Doe",
-                "provider_id": "123456789"
-            }
+            # Верифікація токена через відповідний сервіс
+            oauth_user_info = None
+            if provider == "google":
+                oauth_user_info = await self.oauth2_service.verify_google_token(token)
+            elif provider == "apple":
+                oauth_user_info = await self.oauth2_service.verify_apple_token(token)
             
-            # Пошук користувача за email або створення нового
+            if not oauth_user_info:
+                return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
+            
+            # Пошук користувача за email
             user = await self.db.users.find_one({"email": oauth_user_info["email"]})
             
             if not user:
-                # Створення нового користувача
+                # Створення нового користувача тільки якщо його немає
                 user_data = {
                     "first_name": oauth_user_info["first_name"],
                     "last_name": oauth_user_info["last_name"],
                     "email": oauth_user_info["email"],
+                    "phone": "",
                     "login": oauth_user_info["email"],
+                    "password": None,  # OAuth2 користувачі не мають пароля
                     "created_at": datetime.utcnow(),
-                    "language_code": "uk",
+                    "updated_at": datetime.utcnow(),
+                    "language_code": language,
                     "is_verified": True,  # OAuth2 користувачі автоматично верифіковані
+                    "user_type": "client",
                     "oauth2_info": {
                         "provider": provider,
                         "provider_id": oauth_user_info["provider_id"],
-                        "access_token": token
+                        "access_token": token,
+                        "picture": oauth_user_info.get("picture", "")
                     },
                     "favorites": [],
                     "search_history": [],
                     "notifications_settings": {
                         "telegram": True,
                         "email": True
+                    },
+                    # Клієнтські поля
+                    "client_status": "active",
+                    "assigned_agent_id": None,
+                    "client_interests": [],
+                    "client_budget": {},
+                    "client_preferred_locations": [],
+                    "client_notes": "",
+                    "client_source": f"oauth2_{provider}",
+                    "client_preferences": {
+                        "property_type": [],
+                        "price_range": {},
+                        "location": [],
+                        "features": []
                     }
                 }
                 
                 user_id = await self.db.users.create(user_data)
                 user = await self.db.users.find_one({"_id": user_id})
             else:
-                # Оновлення OAuth2 інформації
+                # Користувач вже існує - оновлюємо OAuth2 інформацію та верифікуємо
+                update_data = {
+                    "oauth2_info": {
+                        "provider": provider,
+                        "provider_id": oauth_user_info["provider_id"],
+                        "access_token": token,
+                        "picture": oauth_user_info.get("picture", "")
+                    },
+                    "is_verified": True,  # OAuth2 користувачі автоматично верифіковані
+                    "updated_at": datetime.utcnow()
+                }
+                
+                # Якщо це перший OAuth2 логін для цього користувача, оновлюємо фото
+                if oauth_user_info.get("picture"):
+                    update_data["oauth2_info"]["picture"] = oauth_user_info["picture"]
+                
                 await self.db.users.update(
-                    {"_id": user["_id"]},
-                    {
-                        "oauth2_info": {
-                            "provider": provider,
-                            "provider_id": oauth_user_info["provider_id"],
-                            "access_token": token
-                        }
-                    }
+                    {"_id": ObjectId(user["_id"])},
+                    {"$set": update_data}
                 )
+                
+                # Оновлюємо дані користувача для відповіді
+                user.update(update_data)
             
             # Генерація токенів
             access_token = self.jwt_handler.create_access_token(user["_id"])
@@ -297,11 +400,13 @@ class AuthEndpoints:
             
             # Підготовка даних користувача для відповіді
             user_data = {
-                "id": user["_id"],
+                "id": str(user["_id"]),
                 "email": user["email"],
                 "first_name": user["first_name"],
                 "last_name": user["last_name"],
-                "is_verified": user.get("is_verified", False)
+                "phone": user.get("phone", ""),
+                "is_verified": user.get("is_verified", False),
+                "picture": user.get("oauth2_info", {}).get("picture", "")
             }
             
             return Response.success({
@@ -320,10 +425,15 @@ class AuthEndpoints:
     async def request_password_reset(self, request: Request) -> Dict[str, Any]:
         """
         Запит на відновлення пароля.
+        
+        Параметри:
+        - email: обов'язковий
+        - language: опціональний (uk, ru, en), за замовчуванням uk
         """
         try:
             data = await request.json()
             email = data.get("email", "").lower().strip()
+            language = data.get("language", "uk")  # Мова для неавторизованого користувача
             
             if not email:
                 return Response.error("Email обов'язковий", status_code=status.HTTP_400_BAD_REQUEST)
@@ -334,8 +444,22 @@ class AuthEndpoints:
             if not user:
                 raise AuthException(AuthErrorCode.EMAIL_NOT_FOUND)
             
+            # Перевірка верифікації email
+            if not user.get("is_verified", False):
+                return Response.error(
+                    "Email не верифіковано. Спочатку підтвердіть свою електронну адресу.",
+                    status_code=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Перевірка чи користувач має пароль (не OAuth2)
+            if user.get("password") is None:
+                return Response.error(
+                    "Цей акаунт створено через соціальну мережу. Використовуйте вхід через Google або Apple.",
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+            
             # Генерація коду відновлення
-            reset_code = str(uuid.uuid4())
+            reset_code = str(secrets.randbelow(900000) + 100000)
             
             # Збереження коду відновлення
             reset_data = {
@@ -347,7 +471,13 @@ class AuthEndpoints:
             }
             await self.db.verification_codes.create(reset_data)
             
-            # TODO: Відправка email з кодом відновлення
+            # Відправка email з кодом відновлення
+            await self.email_service.send_password_reset_email(
+                email=email,
+                reset_code=reset_code,
+                user_name=f"{user['first_name']} {user['last_name']}",
+                language=user.get("language_code", language)  # Якщо користувач знайдений, використовуємо його мову
+            )
             
             # Логування події
             event_logger = EventLogger({"_id": user["_id"]})
@@ -396,7 +526,7 @@ class AuthEndpoints:
             hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             
             # Оновлення пароля користувача
-            await self.db.users.update({"_id": verification["user_id"]}, {"password": hashed_password})
+            await self.db.users.update({"_id": ObjectId(verification["user_id"])}, {"password": hashed_password})
             
             # Видалення коду відновлення
             await self.db.verification_codes.delete({"code": code})
@@ -453,5 +583,39 @@ class AuthEndpoints:
         except Exception as e:
             return Response.error(
                 message=f"Помилка при виході з системи: {str(e)}",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    async def get_oauth2_urls(self, request: Request) -> Dict[str, Any]:
+        """
+        Отримання URL для OAuth2 авторизації.
+        """
+        try:
+            data = await request.json()
+            redirect_uri = data.get("redirect_uri", "")
+            state = data.get("state", "")
+            
+            if not redirect_uri:
+                return Response.error("redirect_uri обов'язковий", status_code=status.HTTP_400_BAD_REQUEST)
+            
+            urls = {}
+            
+            # Google OAuth2 URL
+            if self.oauth2_service.google_client_id:
+                urls["google"] = self.oauth2_service.get_google_auth_url(redirect_uri, state)
+            
+            # Apple OAuth2 URL
+            if self.oauth2_service.apple_client_id:
+                urls["apple"] = self.oauth2_service.get_apple_auth_url(redirect_uri, state)
+            
+            return Response.success({
+                "oauth2_urls": urls,
+                "redirect_uri": redirect_uri,
+                "state": state
+            })
+            
+        except Exception as e:
+            return Response.error(
+                message=f"Помилка при отриманні OAuth2 URLs: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             ) 

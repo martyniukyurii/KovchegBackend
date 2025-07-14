@@ -52,9 +52,10 @@ class AIAssistantEndpoints:
                 return Response.error("Нерухомість не знайдено", status_code=404)
 
             # Отримання всіх активних клієнтів
-            clients = await self.db.clients.find({
-                "status": "active",
-                "preferences": {"$exists": True}
+            clients = await self.db.users.find({
+                "user_type": "client",
+                "client_status": "active",
+                "client_preferences": {"$exists": True}
             })
             
             if not clients:
@@ -785,9 +786,10 @@ class AIAssistantEndpoints:
         })
         
         # Активні клієнти агента
-        active_clients = await self.db.clients.find({
-            "agent_id": agent_id,
-            "status": "active"
+        active_clients = await self.db.users.find({
+            "user_type": "client",
+            "assigned_agent_id": agent_id,
+            "client_status": "active"
         })
         
         # Заплановані події на сьогодні
@@ -807,10 +809,11 @@ class AIAssistantEndpoints:
         
         # Клієнти без активності > 7 днів
         week_ago = datetime.utcnow() - timedelta(days=7)
-        inactive_clients = await self.db.clients.find({
-            "agent_id": agent_id,
+        inactive_clients = await self.db.users.find({
+            "user_type": "client",
+            "assigned_agent_id": agent_id,
             "last_contact": {"$lt": week_ago},
-            "status": "active"
+            "client_status": "active"
         })
         
         return {

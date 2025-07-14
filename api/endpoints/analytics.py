@@ -32,7 +32,7 @@ class AnalyticsEndpoints:
             
             # Підрахунок основних метрик
             total_properties = await self.db.properties.count({"status": "active"})
-            total_clients = await self.db.clients.count({"status": "active"})
+            total_clients = await self.db.users.count_documents({"user_type": "client", "client_status": "active"})
             total_deals = await self.db.deals.count({})
             total_agents = await self.db.agents.count({"status": "active"})
             
@@ -42,7 +42,8 @@ class AnalyticsEndpoints:
                 "created_at": {"$gte": last_month},
                 "status": "active"
             })
-            new_clients_last_month = await self.db.clients.count({
+            new_clients_last_month = await self.db.users.count_documents({
+                "user_type": "client",
                 "created_at": {"$gte": last_month}
             })
             deals_last_month = await self.db.deals.count({

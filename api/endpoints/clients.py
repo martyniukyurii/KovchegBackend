@@ -36,15 +36,15 @@ class ClientsEndpoints:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
             skip = (page - 1) * limit
-            clients = await self.db.clients.find(
-                {},
+            clients = await self.db.users.find(
+                {"user_type": "client"},
                 skip=skip,
                 limit=limit,
                 sort=[("created_at", -1)]
             )
             
             # Підрахунок загальної кількості
-            total = await self.db.clients.count({})
+            total = await self.db.users.count_documents({"user_type": "client"})
             
             return Response.success({
                 "clients": clients,
@@ -93,20 +93,36 @@ class ClientsEndpoints:
                 "last_name": data["last_name"],
                 "email": data.get("email", ""),
                 "phone": data["phone"],
-                "type": data.get("type", "individual"),  # individual, corporate
-                "interests": data.get("interests", []),
-                "budget": data.get("budget", {}),
-                "preferred_locations": data.get("preferred_locations", []),
-                "notes": data.get("notes", ""),
-                "status": "active",
-                "source": data.get("source", "manual"),
+                "login": data.get("email", ""),
+                "password": None,  # Клієнт створений агентом, пароль не потрібен
+                "user_type": "client",
+                "client_status": "active",
+                "client_interests": data.get("interests", []),
+                "client_budget": data.get("budget", {}),
+                "client_preferred_locations": data.get("preferred_locations", []),
+                "client_notes": data.get("notes", ""),
+                "client_source": data.get("source", "manual"),
                 "assigned_agent_id": data.get("assigned_agent_id"),
                 "created_by": user_id,
                 "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.utcnow(),
+                "is_verified": False,
+                "language_code": "uk",
+                "favorites": [],
+                "search_history": [],
+                "notifications_settings": {
+                    "telegram": True,
+                    "email": True
+                },
+                "client_preferences": {
+                    "property_type": data.get("property_type", []),
+                    "price_range": data.get("price_range", {}),
+                    "location": data.get("location", []),
+                    "features": data.get("features", [])
+                }
             }
             
-            client_id = await self.db.clients.create(client_data)
+            client_id = await self.db.users.create(client_data)
             
             # Логування події
             event_logger = EventLogger({"_id": user_id})
@@ -144,7 +160,7 @@ class ClientsEndpoints:
             if not user_id:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
-            client = await self.db.clients.find_one({"_id": client_id})
+            client = await self.db.users.find_one({"_id": client_id, "user_type": "client"})
             
             if not client:
                 raise AuthException(AuthErrorCode.CLIENT_NOT_FOUND)
@@ -181,7 +197,7 @@ class ClientsEndpoints:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
             # Перевірка існування клієнта
-            client = await self.db.clients.find_one({"_id": client_id})
+            client = await self.db.users.find_one({"_id": client_id, "user_type": "client"})
             if not client:
                 raise AuthException(AuthErrorCode.CLIENT_NOT_FOUND)
             
@@ -194,15 +210,15 @@ class ClientsEndpoints:
             
             # Поля, які можна оновити
             updatable_fields = [
-                "first_name", "last_name", "email", "phone", "type", 
-                "interests", "budget", "preferred_locations", "notes", 
-                "status", "assigned_agent_id"
+                "first_name", "last_name", "email", "phone", 
+                "client_interests", "client_budget", "client_preferred_locations", 
+                "client_notes", "client_status", "assigned_agent_id"
             ]
             for field in updatable_fields:
                 if field in data:
                     update_data[field] = data[field]
             
-            await self.db.clients.update({"_id": client_id}, update_data)
+            await self.db.users.update({"_id": client_id}, update_data)
             
             # Логування події
             event_logger = EventLogger({"_id": user_id})
@@ -244,11 +260,11 @@ class ClientsEndpoints:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
             # Перевірка існування клієнта
-            client = await self.db.clients.find_one({"_id": client_id})
+            client = await self.db.users.find_one({"_id": client_id, "user_type": "client"})
             if not client:
                 raise AuthException(AuthErrorCode.CLIENT_NOT_FOUND)
             
-            await self.db.clients.delete({"_id": client_id})
+            await self.db.users.delete({"_id": client_id})
             
             # Логування події
             event_logger = EventLogger({"_id": user_id})

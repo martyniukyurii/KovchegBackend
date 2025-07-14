@@ -98,7 +98,7 @@ class DealsEndpoints:
             if not property_obj:
                 raise AuthException(AuthErrorCode.PROPERTY_NOT_FOUND)
             
-            client = await self.db.clients.find_one({"_id": data["client_id"]})
+            client = await self.db.users.find_one({"_id": data["client_id"], "user_type": "client"})
             if not client:
                 raise AuthException(AuthErrorCode.CLIENT_NOT_FOUND)
             

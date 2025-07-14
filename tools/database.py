@@ -110,7 +110,6 @@ class Database:
         self.admins = CollectionHandler(self, "admins")
         self.properties = CollectionHandler(self, "properties")
         self.agents = CollectionHandler(self, "agents")
-        self.clients = CollectionHandler(self, "clients")
         self.deals = CollectionHandler(self, "deals")
         self.calendar_events = CollectionHandler(self, "calendar_events")
         self.documents = CollectionHandler(self, "documents")
@@ -168,11 +167,10 @@ class Database:
             # Індекси для agents
             await db.agents.create_index([("user_id", 1)], unique=True)
             
-            # Індекси для clients
-            await db.clients.create_index([("agent_id", 1)])
-            await db.clients.create_index([("user_id", 1)], sparse=True)
-            await db.clients.create_index([("email", 1)], sparse=True)
-            await db.clients.create_index([("phone", 1)], sparse=True)
+            # Індекси для users (включаючи клієнтські поля)
+            await db.users.create_index([("assigned_agent_id", 1)], sparse=True)
+            await db.users.create_index([("user_type", 1)])
+            await db.users.create_index([("client_status", 1)], sparse=True)
             
             # Індекси для deals
             await db.deals.create_index([("property_id", 1)])
@@ -278,7 +276,11 @@ class CollectionHandler:
         """Оновлює документи в колекції."""
         try:
             collection = await self.db._get_collection(self.collection_name, user)
-            result = await collection.update_many(query, {"$set": update_data})
+            # Якщо update_data вже містить MongoDB оператори, використовуємо як є
+            if any(key.startswith('$') for key in update_data.keys()):
+                result = await collection.update_many(query, update_data)
+            else:
+                result = await collection.update_many(query, {"$set": update_data})
             return result.modified_count
         except Exception as e:
             logger.error(f"Error updating documents in {self.collection_name}: {e}")
@@ -288,7 +290,11 @@ class CollectionHandler:
         """Оновлює один документ в колекції."""
         try:
             collection = await self.db._get_collection(self.collection_name, user)
-            result = await collection.update_one(query, update_data)
+            # Якщо update_data вже містить MongoDB оператори, використовуємо як є
+            if any(key.startswith('$') for key in update_data.keys()):
+                result = await collection.update_one(query, update_data)
+            else:
+                result = await collection.update_one(query, {"$set": update_data})
             return result.modified_count
         except Exception as e:
             logger.error(f"Error updating document in {self.collection_name}: {e}")

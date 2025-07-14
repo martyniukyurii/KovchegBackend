@@ -1,27 +1,43 @@
 DB: VashKovchegCRM
-├── users
+├── users (об'єднана з clients)
 │   ├── _id (primary key)
 │   ├── first_name
 │   ├── last_name
 │   ├── email
 │   ├── phone
 │   ├── login
-│   ├── password
+│   ├── password (nullable для OAuth2)
 │   ├── created_at
-│   ├── language_code
+│   ├── updated_at
+│   ├── language_code (uk, ru, en)
 │   ├── is_verified
+│   ├── user_type (client, agent, admin)
 │   ├── oauth2_info
 │   │   ├── provider
 │   │   ├── provider_id
-│   │   └── access_token
+│   │   ├── access_token
+│   │   └── picture
 │   ├── telegram_id
 │   ├── favorites
 │   │   └── [property_ids] (references properties._id)
 │   ├── search_history
 │   │   └── [search_queries]
-│   └── notifications_settings
-│       ├── telegram
-│       └── email
+│   ├── notifications_settings
+│   │   ├── telegram
+│   │   └── email
+│   ├── client_status (active, inactive, lead)
+│   ├── assigned_agent_id (references agents._id)
+│   ├── client_interests
+│   ├── client_budget
+│   ├── client_preferred_locations
+│   ├── client_notes
+│   ├── client_source (self_registered, manual, oauth2_google, oauth2_apple)
+│   ├── client_preferences
+│   │   ├── property_type
+│   │   ├── price_range
+│   │   ├── location
+│   │   └── features
+│   └── created_by (references users._id, для клієнтів створених агентами)
 ├── verification_codes
 │   ├── _id (primary key)
 │   ├── user_id (references users._id)
@@ -103,27 +119,12 @@ DB: VashKovchegCRM
 │   ├── active_listings
 │   └── training_programs
 │       └── [program_ids] (references training_programs._id)
-├── clients
-│   ├── _id (primary key)
-│   ├── agent_id (references agents._id)
-│   ├── user_id (references users._id, optional)
-│   ├── first_name
-│   ├── last_name
-│   ├── email
-│   ├── phone
-│   ├── preferences
-│   │   ├── property_type
-│   │   ├── price_range
-│   │   ├── location
-│   │   └── features
-│   ├── status
-│   ├── created_at
-│   └── updated_at
+
 ├── deals
 │   ├── _id (primary key)
 │   ├── property_id (references properties._id)
-│   ├── seller_id (references users._id or clients._id)
-│   ├── buyer_id (references users._id or clients._id)
+│   ├── seller_id (references users._id)
+│   ├── buyer_id (references users._id)
 │   ├── agent_id (references agents._id)
 │   ├── deal_type
 │   ├── status
