@@ -19,28 +19,28 @@ class EmailService:
         # Переклади для email
         self.translations = {
             "uk": {
-                "verification_subject": "Підтвердження реєстрації - Kovcheg",
-                "verification_title": "Ласкаво просимо до Kovcheg!",
+                "verification_subject": "Підтвердження реєстрації - Ваш Ковчег",
+                "verification_title": "Ласкаво просимо до Ваш Ковчег!",
                 "verification_greeting": "Привіт",
-                "verification_thanks": "Дякуємо за реєстрацію в системі Kovcheg. Для завершення реєстрації, будь ласка, підтвердіть свою електронну адресу.",
+                "verification_thanks": "Дякуємо за реєстрацію в системі Ваш Ковчег. Для завершення реєстрації, будь ласка, підтвердіть свою електронну адресу.",
                 "verification_code_label": "Ваш код верифікації:",
                 "verification_instructions": "Введіть цей код в додатку для підтвердження вашої електронної адреси.",
                 "verification_expires": "Код дійсний протягом 24 годин.",
-                "signature": "З повагою,<br>Команда Kovcheg",
+                "signature": "З повагою,<br>Команда Ваш Ковчег",
                 
-                "reset_subject": "Відновлення паролю - Kovcheg",
+                "reset_subject": "Відновлення паролю - Ваш Ковчег",
                 "reset_title": "Відновлення паролю",
                 "reset_greeting": "Привіт",
-                "reset_message": "Ви запросили відновлення паролю для вашого акаунту в системі Kovcheg.",
+                "reset_message": "Ви запросили відновлення паролю для вашого акаунту в системі Ваш Ковчег.",
                 "reset_code_label": "Ваш код відновлення паролю:",
                 "reset_instructions": "Введіть цей код в додатку разом з новим паролем.",
                 "reset_warning": "⚠️ Увага:",
                 "reset_warning_text": "Код дійсний лише 1 годину. Якщо ви не запросили відновлення паролю, проігноруйте цей лист.",
                 
-                "welcome_subject": "Ласкаво просимо до Kovcheg!",
+                "welcome_subject": "Ласкаво просимо до Ваш Ковчег!",
                 "welcome_title": "Вітаємо",
                 "welcome_message": "Ваш акаунт успішно створено та верифіковано!",
-                "welcome_features": "Тепер ви можете користуватися всіма можливостями платформи Kovcheg:",
+                "welcome_features": "Тепер ви можете користуватися всіма можливостями платформи Ваш Ковчег:",
                 "feature_search": "🏠 Пошук нерухомості",
                 "feature_agents": "💼 Робота з агентами",
                 "feature_analytics": "📊 Аналітика ринку",
@@ -48,28 +48,28 @@ class EmailService:
                 "welcome_wishes": "Бажаємо вам успішних угод!"
             },
             "ru": {
-                "verification_subject": "Подтверждение регистрации - Kovcheg",
-                "verification_title": "Добро пожаловать в Kovcheg!",
+                "verification_subject": "Подтверждение регистрации - Ваш Ковчег",
+                "verification_title": "Добро пожаловать в Ваш Ковчег!",
                 "verification_greeting": "Привет",
-                "verification_thanks": "Спасибо за регистрацию в системе Kovcheg. Для завершения регистрации, пожалуйста, подтвердите свой электронный адрес.",
+                "verification_thanks": "Спасибо за регистрацию в системе Ваш Ковчег. Для завершения регистрации, пожалуйста, подтвердите свой электронный адрес.",
                 "verification_code_label": "Ваш код верификации:",
                 "verification_instructions": "Введите этот код в приложении для подтверждения вашего электронного адреса.",
                 "verification_expires": "Код действителен в течение 24 часов.",
-                "signature": "С уважением,<br>Команда Kovcheg",
+                "signature": "С уважением,<br>Команда Ваш Ковчег",
                 
-                "reset_subject": "Восстановление пароля - Kovcheg",
+                "reset_subject": "Восстановление пароля - Ваш Ковчег",
                 "reset_title": "Восстановление пароля",
                 "reset_greeting": "Привет",
-                "reset_message": "Вы запросили восстановление пароля для вашего аккаунта в системе Kovcheg.",
+                "reset_message": "Вы запросили восстановление пароля для вашего аккаунта в системе Ваш Ковчег.",
                 "reset_code_label": "Ваш код восстановления пароля:",
                 "reset_instructions": "Введите этот код в приложении вместе с новым паролем.",
                 "reset_warning": "⚠️ Внимание:",
                 "reset_warning_text": "Код действителен только 1 час. Если вы не запрашивали восстановление пароля, проигнорируйте это письмо.",
                 
-                "welcome_subject": "Добро пожаловать в Kovcheg!",
+                "welcome_subject": "Добро пожаловать в Ваш Ковчег!",
                 "welcome_title": "Поздравляем",
                 "welcome_message": "Ваш аккаунт успешно создан и верифицирован!",
-                "welcome_features": "Теперь вы можете пользоваться всеми возможностями платформы Kovcheg:",
+                "welcome_features": "Теперь вы можете пользоваться всеми возможностями платформы Ваш Ковчег:",
                 "feature_search": "🏠 Поиск недвижимости",
                 "feature_agents": "💼 Работа с агентами",
                 "feature_analytics": "📊 Аналитика рынка",
@@ -77,28 +77,28 @@ class EmailService:
                 "welcome_wishes": "Желаем вам успешных сделок!"
             },
             "en": {
-                "verification_subject": "Registration Confirmation - Kovcheg",
-                "verification_title": "Welcome to Kovcheg!",
+                "verification_subject": "Registration Confirmation - Ваш Ковчег",
+                "verification_title": "Welcome to Ваш Ковчег!",
                 "verification_greeting": "Hello",
-                "verification_thanks": "Thank you for registering with Kovcheg. To complete your registration, please verify your email address.",
+                "verification_thanks": "Thank you for registering with Ваш Ковчег. To complete your registration, please verify your email address.",
                 "verification_code_label": "Your verification code:",
                 "verification_instructions": "Enter this code in the app to confirm your email address.",
                 "verification_expires": "Code is valid for 24 hours.",
-                "signature": "Best regards,<br>Kovcheg Team",
+                "signature": "Best regards,<br>Ваш Ковчег Team",
                 
-                "reset_subject": "Password Reset - Kovcheg",
+                "reset_subject": "Password Reset - Ваш Ковчег",
                 "reset_title": "Password Reset",
                 "reset_greeting": "Hello",
-                "reset_message": "You requested a password reset for your Kovcheg account.",
+                "reset_message": "You requested a password reset for your Ваш Ковчег account.",
                 "reset_code_label": "Your password reset code:",
                 "reset_instructions": "Enter this code in the app along with your new password.",
                 "reset_warning": "⚠️ Warning:",
                 "reset_warning_text": "Code is valid for only 1 hour. If you did not request a password reset, please ignore this email.",
                 
-                "welcome_subject": "Welcome to Kovcheg!",
+                "welcome_subject": "Welcome to Ваш Ковчег!",
                 "welcome_title": "Congratulations",
                 "welcome_message": "Your account has been successfully created and verified!",
-                "welcome_features": "Now you can use all the features of the Kovcheg platform:",
+                "welcome_features": "Now you can use all the features of the Ваш Ковчег platform:",
                 "feature_search": "🏠 Property Search",
                 "feature_agents": "💼 Work with Agents",
                 "feature_analytics": "📊 Market Analytics",
@@ -161,7 +161,7 @@ class EmailService:
             """
             
             params = {
-                "from": "Kovcheg <noreply@mediamood.today>",
+                "from": "Ваш Ковчег <noreply@mediamood.today>",
                 "to": [email],
                 "subject": subject,
                 "html": html_content
@@ -226,7 +226,7 @@ class EmailService:
             """
             
             params = {
-                "from": "Kovcheg <noreply@mediamood.today>",
+                "from": "Ваш Ковчег <noreply@mediamood.today>",
                 "to": [email],
                 "subject": subject,
                 "html": html_content
@@ -289,7 +289,7 @@ class EmailService:
             """
             
             params = {
-                "from": "Kovcheg <noreply@mediamood.today>",
+                "from": "Ваш Ковчег <noreply@mediamood.today>",
                 "to": [email],
                 "subject": subject,
                 "html": html_content
