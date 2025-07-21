@@ -1,32 +1,15 @@
-FROM python:3.11-slim
+FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
 
-# Встановлення системних залежностей
+# Додаткові системні залежності
 RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    gnupg \
     gcc \
     python3-dev \
     build-essential \
-    # Залежності для Chromium
-    libnss3 \
-    libnspr4 \
-    libatk-bridge2.0-0 \
-    libdrm2 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Встановлення Node.js для Playwright
-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs
-
-# Створення користувача (безпека)
-RUN useradd -m -u 1000 appuser
+# Додання існуючого користувача pwuser в Docker групу
+RUN groupadd -f docker \
+    && usermod -aG docker pwuser || true
 
 # Робоча директорія
 WORKDIR /app
@@ -41,13 +24,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Зміна власника файлів
-RUN chown -R appuser:appuser /app
+RUN chown -R pwuser:pwuser /app
 
-# Перехід до користувача appuser
-USER appuser
+# Перехід до користувача pwuser
+USER pwuser
 
-# Встановлення Playwright браузерів під appuser (без системних залежностей)
-RUN playwright install chromium
+# Встановлення Playwright браузерів під pwuser (вже встановлені в базовому образі)
+# RUN playwright install chromium firefox
 
 # Відкриття порту
 EXPOSE 8000

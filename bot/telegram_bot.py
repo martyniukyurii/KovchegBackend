@@ -157,6 +157,7 @@ class TelegramBot:
         keyboard = InlineKeyboardMarkup(row_width=1)
         keyboard.add(
             InlineKeyboardButton("🏥 Перевірити стан сервера", callback_data="owner_check_server"),
+            InlineKeyboardButton("📊 Логи парсерів", callback_data="owner_parser_logs"),
             InlineKeyboardButton("👥 Переглянути заявки адмінів", callback_data="owner_view_applications"),
             InlineKeyboardButton("👨‍💼 Список адмінів", callback_data="owner_view_admins"),
             InlineKeyboardButton("🗑️ Видалити адміна", callback_data="owner_delete_admin"),
@@ -208,6 +209,9 @@ class TelegramBot:
             
         elif action == "check_server":
             await self.check_server_status(callback)
+            
+        elif action == "parser_logs":
+            await self.show_parser_logs(callback)
         
         await callback.answer()
     
@@ -1073,6 +1077,49 @@ class TelegramBot:
                 f"❌ <b>Помилка при перевірці сервера:</b>\n\n"
                 f"{str(e)}\n\n"
                 f"Можливо, сервер недоступний або виникли проблеми з мережею."
+            )
+            
+        await callback.message.answer(status_message, parse_mode='HTML')
+
+    async def show_parser_logs(self, callback: types.CallbackQuery):
+        """Показати останні логи парсерів"""
+        try:
+            import subprocess
+            
+            # Отримуємо логи парсера контейнера
+            result = subprocess.run(
+                ["docker", "logs", "kovcheg-parser", "--tail", "50"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                logs = result.stdout
+                
+                # Обмежуємо розмір повідомлення
+                if len(logs) > 3500:
+                    logs = "...\n" + logs[-3500:]
+                
+                # Форматуємо логи
+                status_message = (
+                    f"📊 <b>Останні логи парсера</b>\n"
+                    f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+                    f"<code>{logs}</code>"
+                )
+                
+            else:
+                status_message = (
+                    f"❌ <b>Помилка отримання логів:</b>\n\n"
+                    f"<code>{result.stderr}</code>"
+                )
+                
+        except subprocess.TimeoutExpired:
+            status_message = "⏰ <b>Таймаут при отриманні логів</b>\n\nСпробуйте пізніше."
+        except Exception as e:
+            status_message = (
+                f"❌ <b>Помилка при отриманні логів:</b>\n\n"
+                f"{str(e)}"
             )
             
         await callback.message.answer(status_message, parse_mode='HTML')

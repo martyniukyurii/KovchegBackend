@@ -59,46 +59,102 @@ class OLXParser:
         self.telegram_bot = TelegramBot()
         
     async def setup_browser(self):
-        """Налаштування браузера для парсингу"""
-        try:
-            self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch(
-                headless=True,
-                args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-web-security']
-            )
-            self.context = await self.browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            )
-            self.page = await self.context.new_page()
-            self.logger.info("✅ Браузер ініціалізовано")
-            return True
-        except Exception as e:
-            self.logger.warning(f"⚠️ Не вдалося ініціалізувати браузер: {e}")
-            self.logger.warning(f"🔄 Спроба з Firefox...")
-            
-            # Спробуємо Firefox як fallback
+        """Налаштування браузера для парсингу з обробкою всіх помилок"""
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
             try:
+                # Фікс для Docker середовища
+                import os
+                os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', '0')
+                
+                # Закриваємо попередні з'єднання якщо є
+                if hasattr(self, 'browser') and self.browser:
+                    try:
+                        await self.browser.close()
+                    except:
+                        pass
+                        
+                if hasattr(self, 'playwright') and self.playwright:
+                    try:
+                        await self.playwright.stop()
+                    except:
+                        pass
+                
                 self.playwright = await async_playwright().start()
-                self.browser = await self.playwright.firefox.launch(
-                    headless=True,
-                    args=['--no-sandbox']
-                )
+                
+                # Спробуємо Chromium
+                try:
+                    self.browser = await self.playwright.chromium.launch(
+                        headless=True,
+                        args=[
+                            '--no-sandbox', 
+                            '--disable-dev-shm-usage', 
+                            '--disable-web-security',
+                            '--disable-features=VizDisplayCompositor',
+                            '--disable-ipc-flooding-protection',
+                            '--disable-background-timer-throttling',
+                            '--disable-renderer-backgrounding'
+                        ]
+                    )
+                    browser_name = "Chromium"
+                except Exception as chromium_error:
+                    self.logger.warning(f"⚠️ Chromium недоступний: {chromium_error}")
+                    # Спробуємо Firefox
+                    try:
+                        self.browser = await self.playwright.firefox.launch(
+                            headless=True,
+                            args=[
+                                '--no-sandbox',
+                                '--disable-dev-shm-usage'
+                            ]
+                        )
+                        browser_name = "Firefox"
+                    except Exception as firefox_error:
+                        self.logger.warning(f"⚠️ Firefox недоступний: {firefox_error}")
+                        # Спробуємо Webkit
+                        self.browser = await self.playwright.webkit.launch(
+                            headless=True
+                        )
+                        browser_name = "Webkit"
+                
                 self.context = await self.browser.new_context(
-                    viewport={'width': 1920, 'height': 1080}
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
                 )
+                
+                # Налаштовуємо обробку помилок для контексту
+                self.context.set_default_timeout(30000)  # 30 секунд
+                
                 self.page = await self.context.new_page()
-                self.logger.info("✅ Firefox браузер ініціалізовано")
+                
+                # Обробка помилок сторінки
+                self.page.on("pageerror", lambda error: self.logger.warning(f"⚠️ JS помилка на сторінці: {error}"))
+                self.page.on("requestfailed", lambda request: self.logger.warning(f"⚠️ Запит не вдався: {request.url}"))
+                
+                self.logger.info(f"✅ {browser_name} браузер ініціалізовано")
                 return True
-            except Exception as e2:
-                self.logger.error(f"❌ Не вдалося ініціалізувати жоден браузер: {e2}")
-                self.browser = None
-                self.context = None
-                self.page = None
-                return False
+                
+            except Exception as e:
+                retry_count += 1
+                self.logger.warning(f"⚠️ Спроба {retry_count}/{max_retries} ініціалізації браузера не вдалася: {e}")
+                
+                if retry_count < max_retries:
+                    await asyncio.sleep(5)  # Чекаємо 5 секунд перед повторною спробою
+                else:
+                    self.logger.error(f"❌ Не вдалося ініціалізувати браузер після {max_retries} спроб")
+                    self.browser = None
+                    self.context = None
+                    self.page = None
+                    return False
             
     async def init_browser(self):
         """Ініціалізація браузера"""
+        # Фікс для Docker середовища
+        import os
+        os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', '0')
+        
         self.playwright = await async_playwright().start()
         
         # Використовуємо Firefox з додатковими налаштуваннями для серверного середовища
@@ -830,6 +886,31 @@ class OLXParser:
         except Exception as e:
             self.logger.error(f"Помилка при парсингу сторінки списку {list_url}: {e}")
             return []
+    async def safe_execute(self, func, *args, **kwargs):
+        """Безпечне виконання функції з обробкою помилок"""
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                retry_count += 1
+                self.logger.warning(f"⚠️ Помилка виконання {func.__name__}, спроба {retry_count}/{max_retries}: {e}")
+                
+                # Якщо помилка пов'язана з браузером, спробуємо перезапустити
+                if any(keyword in str(e).lower() for keyword in ['connection', 'browser', 'playwright', 'timeout']):
+                    self.logger.info("🔄 Перезапуск браузера...")
+                    try:
+                        await self.setup_browser()
+                    except:
+                        pass
+                
+                if retry_count < max_retries:
+                    await asyncio.sleep(5 * retry_count)  # Експоненційна затримка
+                else:
+                    self.logger.error(f"❌ Остаточна помилка {func.__name__}: {e}")
+                    return None
             
     async def parse_all_olx_urls(self, urls_data: List[Dict]) -> List[Dict]:
         """Парсимо всі OLX URL з файлу посилань"""
@@ -852,18 +933,16 @@ class OLXParser:
             
             self.logger.info(f"Парсимо категорію {property_type}: {url}")
             
-            try:
-                results = await self.parse_listing_page(url, property_type)
-                
-                # Тип нерухомості вже додано в parse_listing_page
-                    
+            # Безпечне виконання парсингу
+            results = await self.safe_execute(self.parse_listing_page, url, property_type)
+            if results:
                 all_results.extend(results)
-                
                 self.logger.info(f"Отримано {len(results)} оголошень з категорії {property_type}")
+            else:
+                self.logger.warning(f"⚠️ Не вдалося отримати результати з категорії {property_type}")
                 
-            except Exception as e:
-                self.logger.error(f"Помилка при парсингу категорії {property_type}: {e}")
-                continue
+            # Затримка між категоріями
+            await asyncio.sleep(3)
                 
         # Закриваємо браузер після завершення
         await self.close_browser()
