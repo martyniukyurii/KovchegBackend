@@ -11,6 +11,7 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./monitoring_logs:/app/monitoring_logs
+      - parser_logs:/app/logs  # Спільний том для логів
     restart: unless-stopped
     deploy:
       resources:
@@ -41,6 +42,7 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./monitoring_logs:/app/monitoring_logs
+      - parser_logs:/app/logs  # Спільний том для логів
     restart: unless-stopped
     command: ["python", "system/main.py"]
     cap_add:
@@ -76,4 +78,8 @@ services:
 
 networks:
   default:
-    name: kovcheg-network 
+    name: kovcheg-network
+
+volumes:
+  parser_logs:
+    driver: local 

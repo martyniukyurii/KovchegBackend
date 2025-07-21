@@ -1084,42 +1084,79 @@ class TelegramBot:
     async def show_parser_logs(self, callback: types.CallbackQuery):
         """Показати останні логи парсерів"""
         try:
-            import subprocess
+            import os
+            from pathlib import Path
             
-            # Отримуємо логи парсера контейнера
-            result = subprocess.run(
-                ["docker", "logs", "kovcheg-parser", "--tail", "50"],
-                capture_output=True,
-                text=True,
-                timeout=10
+            # Спробуємо прочитати логи з файлу системи
+            log_file_paths = [
+                "/app/logs/parser.log",  # Основний лог парсера (спільний том)
+                "/app/system/system.log",  # Альтернативний лог парсера
+                "/app/monitoring_logs/parser.log",  # Альтернативний шлях
+                "/var/log/parser.log"  # Системний лог
+            ]
+            
+            logs_content = ""
+            log_source = ""
+            
+            # Шукаємо доступний лог файл
+            for log_path in log_file_paths:
+                if os.path.exists(log_path):
+                    try:
+                        with open(log_path, 'r', encoding='utf-8') as f:
+                            # Читаємо останні 50 рядків
+                            lines = f.readlines()
+                            logs_content = ''.join(lines[-50:])
+                            log_source = log_path
+                            break
+                    except Exception as e:
+                        continue
+            
+            # Якщо лог файли недоступні, покажемо інформацію про стан парсера
+            if not logs_content:
+                try:
+                    # Отримуємо інформацію про процеси Python
+                    import psutil
+                    python_processes = []
+                    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
+                        try:
+                            if 'python' in proc.info['name'].lower():
+                                cmdline = ' '.join(proc.info['cmdline']) if proc.info['cmdline'] else ''
+                                if 'system/main.py' in cmdline or 'parser' in cmdline.lower():
+                                    python_processes.append({
+                                        'pid': proc.info['pid'],
+                                        'cmd': cmdline[:100] + '...' if len(cmdline) > 100 else cmdline,
+                                        'time': datetime.fromtimestamp(proc.info['create_time']).strftime('%H:%M:%S')
+                                    })
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+                    
+                    logs_content = f"🔍 Активні парсер процеси:\n\n"
+                    for proc in python_processes[:5]:  # Показуємо перші 5
+                        logs_content += f"PID: {proc['pid']} | {proc['time']}\n{proc['cmd']}\n\n"
+                    
+                    log_source = "system processes"
+                    
+                except Exception as e:
+                    logs_content = f"❌ Логи недоступні. Причина: {str(e)}"
+                    log_source = "error"
+            
+            # Обмежуємо розмір повідомлення
+            if len(logs_content) > 3500:
+                logs_content = "...\n" + logs_content[-3500:]
+            
+            # Форматуємо логи
+            status_message = (
+                f"📊 <b>Логи парсера</b>\n"
+                f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
+                f"📍 Джерело: {log_source}\n\n"
+                f"<code>{logs_content if logs_content else 'Логи порожні або недоступні'}</code>"
             )
-            
-            if result.returncode == 0:
-                logs = result.stdout
                 
-                # Обмежуємо розмір повідомлення
-                if len(logs) > 3500:
-                    logs = "...\n" + logs[-3500:]
-                
-                # Форматуємо логи
-                status_message = (
-                    f"📊 <b>Останні логи парсера</b>\n"
-                    f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-                    f"<code>{logs}</code>"
-                )
-                
-            else:
-                status_message = (
-                    f"❌ <b>Помилка отримання логів:</b>\n\n"
-                    f"<code>{result.stderr}</code>"
-                )
-                
-        except subprocess.TimeoutExpired:
-            status_message = "⏰ <b>Таймаут при отриманні логів</b>\n\nСпробуйте пізніше."
         except Exception as e:
             status_message = (
                 f"❌ <b>Помилка при отриманні логів:</b>\n\n"
-                f"{str(e)}"
+                f"<code>{str(e)}</code>\n\n"
+                f"💡 <b>Порада:</b> Перевірте стан контейнерів через кнопку 'Перевірити стан сервера'"
             )
             
         await callback.message.answer(status_message, parse_mode='HTML')
