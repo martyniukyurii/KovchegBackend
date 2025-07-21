@@ -6,21 +6,47 @@ from tools.database import Database
 from tools.event_logger import EventLogger
 from datetime import datetime
 from api.jwt_handler import JWTHandler
+from bson import ObjectId
 
 
-class ClientsEndpoints:
+def convert_objectid(data):
+    """Конвертує ObjectId та datetime в рядки для серіалізації в JSON та видаляє векторні ембединги"""
+    if isinstance(data, dict):
+        # Видаляємо векторні ембединги з відповіді (вони не потрібні фронтенду)
+        if 'vector_embedding' in data:
+            del data['vector_embedding']
+            
+        for key, value in data.items():
+            if isinstance(value, ObjectId):
+                data[key] = str(value)
+            elif isinstance(value, datetime):
+                data[key] = value.isoformat()
+            elif isinstance(value, dict) or isinstance(value, list):
+                data[key] = convert_objectid(value)
+    elif isinstance(data, list):
+        for i, item in enumerate(data):
+            if isinstance(item, ObjectId):
+                data[i] = str(item)
+            elif isinstance(item, datetime):
+                data[i] = item.isoformat()
+            elif isinstance(item, dict) or isinstance(item, list):
+                data[i] = convert_objectid(item)
+    return data
+
+
+class UsersEndpoints:
     def __init__(self):
         self.db = Database()
         self.jwt_handler = JWTHandler()
 
-    async def get_clients(
+    async def get_users(
         self,
         request: Request,
         page: int = Query(1, ge=1),
         limit: int = Query(10, ge=1, le=50)
     ) -> Dict[str, Any]:
         """
-        Отримати список клієнтів (потребує авторизації).
+        Отримати список користувачів (потребує авторизації).
         """
         try:
             # Отримання користувача з токена
@@ -36,18 +62,21 @@ class ClientsEndpoints:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
             skip = (page - 1) * limit
-            clients = await self.db.users.find(
+            users = await self.db.users.find(
                 {"user_type": "client"},
                 skip=skip,
                 limit=limit,
                 sort=[("created_at", -1)]
             )
             
+            # Конвертуємо ObjectId в рядки для серіалізації
+            users = convert_objectid(users)
+            
             # Підрахунок загальної кількості
             total = await self.db.users.count_documents({"user_type": "client"})
             
             return Response.success({
-                "clients": clients,
+                "users": users,
                 "pagination": {
                     "page": page,
                     "limit": limit,
@@ -58,13 +87,13 @@ class ClientsEndpoints:
             
         except Exception as e:
             return Response.error(
-                message=f"Помилка при отриманні списку клієнтів: {str(e)}",
+                message=f"Помилка при отриманні списку користувачів: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    async def create_client(self, request: Request) -> Dict[str, Any]:
+    async def create_user(self, request: Request) -> Dict[str, Any]:
         """
-        Створити клієнта (потребує авторизації).
+        Створити користувача (потребує авторизації).
         """
         try:
             # Отримання користувача з токена
@@ -87,14 +116,14 @@ class ClientsEndpoints:
                 if not data.get(field):
                     return Response.error(f"Поле '{field}' є обов'язковим", status_code=status.HTTP_400_BAD_REQUEST)
             
-            # Створення клієнта
-            client_data = {
+            # Створення користувача
+            user_data = {
                 "first_name": data["first_name"],
                 "last_name": data["last_name"],
                 "email": data.get("email", ""),
                 "phone": data["phone"],
                 "login": data.get("email", ""),
-                "password": None,  # Клієнт створений адміном, пароль не потрібен
+                "password": None,  # Користувач створений адміном/адміном, пароль не потрібен
                 "user_type": "client",
                 "client_status": "active",
                 "client_interests": data.get("interests", []),
@@ -122,30 +151,30 @@ class ClientsEndpoints:
                 }
             }
             
-            client_id = await self.db.users.create(client_data)
+            user_id = await self.db.users.create(user_data)
             
             # Логування події
             event_logger = EventLogger({"_id": user_id})
             await event_logger.log_custom_event(
-                event_type="client_created",
-                description=f"Створено клієнта: {data['first_name']} {data['last_name']}",
-                metadata={"client_id": client_id}
+                event_type="user_created",
+                description=f"Створено користувача: {data['first_name']} {data['last_name']}",
+                metadata={"user_id": user_id}
             )
             
             return Response.success({
-                "message": "Клієнта успішно створено",
-                "client_id": client_id
+                "message": "Користувача успішно створено",
+                "user_id": user_id
             })
             
         except Exception as e:
             return Response.error(
-                message=f"Помилка при створенні клієнта: {str(e)}",
+                message=f"Помилка при створенні користувача: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    async def get_client(self, client_id: str, request: Request) -> Dict[str, Any]:
+    async def get_user(self, user_id: str, request: Request) -> Dict[str, Any]:
         """
-        Отримати клієнта за ID (потребує авторизації).
+        Отримати користувача за ID (потребує авторизації).
         """
         try:
             # Отримання користувача з токена
@@ -155,17 +184,26 @@ class ClientsEndpoints:
             
             token = auth_header.split(" ")[1]
             payload = self.jwt_handler.decode_token(token)
-            user_id = payload.get("sub")
+            admin_id = payload.get("sub")
             
-            if not user_id:
+            if not admin_id:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
-            client = await self.db.users.find_one({"_id": client_id, "user_type": "client"})
+            # Конвертуємо рядок в ObjectId
+            try:
+                user_id_obj = ObjectId(user_id)
+            except:
+                raise AuthException(AuthErrorCode.USER_NOT_FOUND)
             
-            if not client:
-                raise AuthException(AuthErrorCode.CLIENT_NOT_FOUND)
+            user = await self.db.users.find_one({"_id": user_id_obj, "user_type": "client"})
             
-            return Response.success({"client": client})
+            if not user:
+                raise AuthException(AuthErrorCode.USER_NOT_FOUND)
+            
+            # Конвертуємо ObjectId в рядки для серіалізації
+            user = convert_objectid(user)
+            
+            return Response.success({"user": user})
             
         except AuthException as e:
             return Response.error(
@@ -175,13 +213,13 @@ class ClientsEndpoints:
             )
         except Exception as e:
             return Response.error(
-                message=f"Помилка при отриманні клієнта: {str(e)}",
+                message=f"Помилка при отриманні користувача: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    async def update_client(self, client_id: str, request: Request) -> Dict[str, Any]:
+    async def update_user(self, user_id: str, request: Request) -> Dict[str, Any]:
         """
-        Оновити клієнта (потребує авторизації).
+        Оновити користувача (потребує авторизації).
         """
         try:
             # Отримання користувача з токена
@@ -191,15 +229,21 @@ class ClientsEndpoints:
             
             token = auth_header.split(" ")[1]
             payload = self.jwt_handler.decode_token(token)
-            user_id = payload.get("sub")
+            admin_id = payload.get("sub")
             
-            if not user_id:
+            if not admin_id:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
-            # Перевірка існування клієнта
-            client = await self.db.users.find_one({"_id": client_id, "user_type": "client"})
-            if not client:
-                raise AuthException(AuthErrorCode.CLIENT_NOT_FOUND)
+            # Конвертуємо рядок в ObjectId
+            try:
+                user_id_obj = ObjectId(user_id)
+            except:
+                raise AuthException(AuthErrorCode.USER_NOT_FOUND)
+            
+            # Перевірка існування користувача
+            user = await self.db.users.find_one({"_id": user_id_obj, "user_type": "client"})
+            if not user:
+                raise AuthException(AuthErrorCode.USER_NOT_FOUND)
             
             data = await request.json()
             
@@ -218,17 +262,17 @@ class ClientsEndpoints:
                 if field in data:
                     update_data[field] = data[field]
             
-            await self.db.users.update({"_id": client_id}, update_data)
+            await self.db.users.update({"_id": user_id_obj}, update_data)
             
             # Логування події
-            event_logger = EventLogger({"_id": user_id})
+            event_logger = EventLogger({"_id": admin_id})
             await event_logger.log_custom_event(
-                event_type="client_updated",
-                description=f"Оновлено клієнта: {client_id}",
-                metadata={"client_id": client_id}
+                event_type="user_updated",
+                description=f"Оновлено користувача: {user_id}",
+                metadata={"user_id": user_id}
             )
             
-            return Response.success({"message": "Клієнта успішно оновлено"})
+            return Response.success({"message": "Користувача успішно оновлено"})
             
         except AuthException as e:
             return Response.error(
@@ -238,13 +282,13 @@ class ClientsEndpoints:
             )
         except Exception as e:
             return Response.error(
-                message=f"Помилка при оновленні клієнта: {str(e)}",
+                message=f"Помилка при оновленні користувача: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    async def delete_client(self, client_id: str, request: Request) -> Dict[str, Any]:
+    async def delete_user(self, user_id: str, request: Request) -> Dict[str, Any]:
         """
-        Видалити клієнта (потребує авторизації).
+        Видалити користувача (потребує авторизації).
         """
         try:
             # Отримання користувача з токена
@@ -254,27 +298,33 @@ class ClientsEndpoints:
             
             token = auth_header.split(" ")[1]
             payload = self.jwt_handler.decode_token(token)
-            user_id = payload.get("sub")
+            admin_id = payload.get("sub")
             
-            if not user_id:
+            if not admin_id:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
-            # Перевірка існування клієнта
-            client = await self.db.users.find_one({"_id": client_id, "user_type": "client"})
-            if not client:
-                raise AuthException(AuthErrorCode.CLIENT_NOT_FOUND)
+            # Конвертуємо рядок в ObjectId
+            try:
+                user_id_obj = ObjectId(user_id)
+            except:
+                raise AuthException(AuthErrorCode.USER_NOT_FOUND)
             
-            await self.db.users.delete({"_id": client_id})
+            # Перевірка існування користувача
+            user = await self.db.users.find_one({"_id": user_id_obj, "user_type": "client"})
+            if not user:
+                raise AuthException(AuthErrorCode.USER_NOT_FOUND)
+            
+            await self.db.users.delete({"_id": user_id_obj})
             
             # Логування події
-            event_logger = EventLogger({"_id": user_id})
+            event_logger = EventLogger({"_id": admin_id})
             await event_logger.log_custom_event(
-                event_type="client_deleted",
-                description=f"Видалено клієнта: {client_id}",
-                metadata={"client_id": client_id}
+                event_type="user_deleted",
+                description=f"Видалено користувача: {user_id}",
+                metadata={"user_id": user_id}
             )
             
-            return Response.success({"message": "Клієнта успішно видалено"})
+            return Response.success({"message": "Користувача успішно видалено"})
             
         except AuthException as e:
             return Response.error(
@@ -284,6 +334,6 @@ class ClientsEndpoints:
             )
         except Exception as e:
             return Response.error(
-                message=f"Помилка при видаленні клієнта: {str(e)}",
+                message=f"Помилка при видаленні користувача: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             ) 

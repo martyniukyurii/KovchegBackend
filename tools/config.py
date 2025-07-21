@@ -21,6 +21,30 @@ class Config:
         self.RESEND_API_KEY = os.getenv("RESEND_API_KEY")  # resend.com - validation email
 
 
+class GoogleDriveConfig:
+    def __init__(self):
+        # Завантаження змінних з кореневого .env файлу проекту
+        load_dotenv()
+        
+        # Google OAuth credentials
+        self.GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+        self.GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+        self.GOOGLE_PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID", "braided-grammar-295920")
+        
+        # Google OAuth tokens (опціонально, можуть бути None)
+        self.GOOGLE_ACCESS_TOKEN = os.getenv("GOOGLE_ACCESS_TOKEN")
+        self.GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
+        self.GOOGLE_TOKEN_EXPIRY = os.getenv("GOOGLE_TOKEN_EXPIRY")
+    
+    def has_credentials(self) -> bool:
+        """Перевіряє чи є необхідні credentials"""
+        return bool(self.GOOGLE_CLIENT_ID and self.GOOGLE_CLIENT_SECRET)
+    
+    def has_tokens(self) -> bool:
+        """Перевіряє чи є збережені токени"""
+        return bool(self.GOOGLE_ACCESS_TOKEN and self.GOOGLE_REFRESH_TOKEN)
+
+
 class ConfigError(Exception):
     """Виняток для помилок конфігурації"""
     pass

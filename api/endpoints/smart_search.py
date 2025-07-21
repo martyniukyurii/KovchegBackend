@@ -3,11 +3,17 @@ from typing import Dict, Any, Optional, List
 from api.response import Response
 from tools.database import Database
 from tools.config import DatabaseConfig
+from tools.embedding_service import EmbeddingService
 from datetime import datetime
 import os
+import warnings
 from langchain_openai import OpenAIEmbeddings
 from langchain.schema import Document
+from api.endpoints.users import convert_objectid
 import asyncio
+
+# Приховуємо попередження від LangChain
+warnings.filterwarnings("ignore", category=UserWarning, module="langchain_openai")
 
 
 class SmartSearchEndpoints:
@@ -25,7 +31,7 @@ class SmartSearchEndpoints:
         request: Request,
         query: str = Query(..., description="Запит людською мовою для пошуку нерухомості"),
         limit: int = Query(10, ge=1, le=50, description="Кількість результатів"),
-        search_type: Optional[str] = Query("all", description="Тип пошуку: properties, parsed_listings, all")
+        collection_key: Optional[str] = Query("all", description="В якій колекції шукати: properties, parsed_listings, all")
     ) -> Dict[str, Any]:
         """
         Розумний пошук нерухомості за запитом людською мовою.
@@ -34,38 +40,38 @@ class SmartSearchEndpoints:
         try:
             # Генерація векторного ембедингу для запиту
             query_embedding = await self._get_embedding(query)
-            
             results = {}
-            
-            if search_type in ["properties", "all"]:
-                # Пошук в колекції properties
+            # Вибір колекції для пошуку
+            if collection_key == "properties":
                 properties_results = await self._search_properties(query_embedding, limit)
+                properties_results = convert_objectid(properties_results)
                 results["properties"] = properties_results
-            
-            if search_type in ["parsed_listings", "all"]:
-                # Пошук в колекції parsed_listings
+            elif collection_key == "parsed_listings":
                 listings_results = await self._search_parsed_listings(query_embedding, limit)
+                listings_results = convert_objectid(listings_results)
                 results["parsed_listings"] = listings_results
-            
-            # Комбінування результатів якщо пошук по всіх колекціях
-            if search_type == "all":
+            else:  # all або будь-яке інше значення
+                properties_results = await self._search_properties(query_embedding, limit)
+                properties_results = convert_objectid(properties_results)
+                listings_results = await self._search_parsed_listings(query_embedding, limit)
+                listings_results = convert_objectid(listings_results)
+                results["properties"] = properties_results
+                results["parsed_listings"] = listings_results
                 combined_results = await self._combine_and_rank_results(
-                    results.get("properties", []),
-                    results.get("parsed_listings", []),
+                    properties_results,
+                    listings_results,
                     limit
                 )
+                combined_results = convert_objectid(combined_results)
                 results["combined"] = combined_results
-            
             # Збереження запиту в історію пошуку (якщо користувач авторизований)
             await self._save_search_query(request, query)
-            
             return Response.success({
                 "query": query,
                 "results": results,
-                "search_type": search_type,
+                "collection_key": collection_key,
                 "timestamp": datetime.utcnow().isoformat()
             })
-            
         except Exception as e:
             return Response.error(
                 message=f"Помилка при розумному пошуку: {str(e)}",
@@ -86,28 +92,47 @@ class SmartSearchEndpoints:
             
             properties_updated = 0
             listings_updated = 0
+            properties_skipped = 0
+            listings_skipped = 0
             
             # Створення ембедингів для properties
             for prop in properties:
-                text_content = self._prepare_property_text(prop)
-                embedding = await self._get_embedding(text_content)
-                
-                await self.db.properties.update_one(
-                    {"_id": prop["_id"]},
-                    {"$set": {"vector_embedding": embedding}}
-                )
-                properties_updated += 1
-            
+                try:
+                    if not isinstance(prop, dict):
+                        properties_skipped += 1
+                        continue
+                    if "_id" not in prop or "title" not in prop:
+                        properties_skipped += 1
+                        continue
+                    text_content = self._prepare_property_text(prop)
+                    embedding = await self._get_embedding(text_content)
+                    await self.db.properties.update_one(
+                        {"_id": prop["_id"]},
+                        {"$set": {"vector_embedding": embedding}}
+                    )
+                    properties_updated += 1
+                except Exception:
+                    properties_skipped += 1
+                    continue
             # Створення ембедингів для parsed_listings
             for listing in parsed_listings:
-                text_content = self._prepare_listing_text(listing)
-                embedding = await self._get_embedding(text_content)
-                
-                await self.db.parsed_listings.update_one(
-                    {"_id": listing["_id"]},
-                    {"$set": {"vector_embedding": embedding}}
-                )
-                listings_updated += 1
+                try:
+                    if not isinstance(listing, dict):
+                        listings_skipped += 1
+                        continue
+                    if "_id" not in listing or "title" not in listing:
+                        listings_skipped += 1
+                        continue
+                    text_content = self._prepare_listing_text(listing)
+                    embedding = await self._get_embedding(text_content)
+                    await self.db.parsed_listings.update_one(
+                        {"_id": listing["_id"]},
+                        {"$set": {"vector_embedding": embedding}}
+                    )
+                    listings_updated += 1
+                except Exception:
+                    listings_skipped += 1
+                    continue
             
             # Створення векторних індексів якщо їх ще немає
             await self.db.create_vector_indexes()
@@ -115,60 +140,14 @@ class SmartSearchEndpoints:
             return Response.success({
                 "message": "Векторні ембединги успішно створено",
                 "properties_updated": properties_updated,
-                "listings_updated": listings_updated
+                "listings_updated": listings_updated,
+                "properties_skipped": properties_skipped,
+                "listings_skipped": listings_skipped
             })
             
         except Exception as e:
             return Response.error(
                 message=f"Помилка при створенні ембедингів: {str(e)}",
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    async def update_embedding_for_record(
-        self,
-        request: Request,
-        collection: str,
-        record_id: str
-    ) -> Dict[str, Any]:
-        """
-        Оновити векторний ембединг для конкретного запису.
-        """
-        try:
-            if collection == "properties":
-                record = await self.db.properties.find_one({"_id": record_id})
-                if not record:
-                    return Response.error("Об'єкт нерухомості не знайдено", status_code=404)
-                
-                text_content = self._prepare_property_text(record)
-                embedding = await self._get_embedding(text_content)
-                
-                await self.db.properties.update_one(
-                    {"_id": record_id},
-                    {"$set": {"vector_embedding": embedding}}
-                )
-                
-            elif collection == "parsed_listings":
-                record = await self.db.parsed_listings.find_one({"_id": record_id})
-                if not record:
-                    return Response.error("Спарсене оголошення не знайдено", status_code=404)
-                
-                text_content = self._prepare_listing_text(record)
-                embedding = await self._get_embedding(text_content)
-                
-                await self.db.parsed_listings.update_one(
-                    {"_id": record_id},
-                    {"$set": {"vector_embedding": embedding}}
-                )
-            else:
-                return Response.error("Невідома колекція", status_code=400)
-            
-            return Response.success({
-                "message": f"Ембединг для запису {record_id} в колекції {collection} оновлено"
-            })
-            
-        except Exception as e:
-            return Response.error(
-                message=f"Помилка при оновленні ембедингу: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -374,7 +353,7 @@ class SmartSearchEndpoints:
                             "$push": {
                                 "search_history": {
                                     "query": query,
-                                    "timestamp": datetime.utcnow(),
+                                    "timestamp": datetime.utcnow().isoformat(),
                                     "search_type": "smart_search"
                                 }
                             }

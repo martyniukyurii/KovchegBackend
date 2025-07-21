@@ -1,10 +1,11 @@
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Depends
+from api.jwt_handler import JWTHandler
+from fastapi import Request, HTTPException, status
 from api.endpoints.auth import AuthEndpoints
 from api.endpoints.admin_auth import AdminAuthEndpoints
 from api.endpoints.telegram_auth import TelegramAuthEndpoints
 from api.endpoints.properties import PropertiesEndpoints
-from api.endpoints.agents import AgentsEndpoints
-from api.endpoints.clients import ClientsEndpoints
+from api.endpoints.users import UsersEndpoints
 from api.endpoints.deals import DealsEndpoints
 from api.endpoints.calendar import CalendarEndpoints
 from api.endpoints.documents import DocumentsEndpoints
@@ -28,8 +29,7 @@ class Router:
         self.admin_auth_handler = AdminAuthEndpoints()
         self.tg_auth_handler = TelegramAuthEndpoints()
         self.properties_handler = PropertiesEndpoints()
-        self.agents_handler = AgentsEndpoints()
-        self.clients_handler = ClientsEndpoints()
+        self.users_handler = UsersEndpoints() # Changed from ClientsEndpoints to UsersEndpoints
         self.deals_handler = DealsEndpoints()
         self.calendar_handler = CalendarEndpoints()
         self.documents_handler = DocumentsEndpoints()
@@ -45,8 +45,8 @@ class Router:
         self.admin_auth_router = APIRouter(prefix="/admin/auth", tags=["Admin Authentication"])
         self.tg_auth_router = APIRouter(prefix="/telegram", tags=["Telegram Auth"])
         self.properties_router = APIRouter(prefix="/properties", tags=["Properties"])
-        self.agents_router = APIRouter(prefix="/agents", tags=["Agents"])
-        self.clients_router = APIRouter(prefix="/clients", tags=["Clients"])
+        self.admins_router = APIRouter(prefix="/admins", tags=["Admins"]) # Змінено з admins на admins
+        self.users_router = APIRouter(prefix="/users", tags=["Users"])
         self.deals_router = APIRouter(prefix="/deals", tags=["Deals"])
         self.calendar_router = APIRouter(prefix="/calendar", tags=["Calendar"])
         self.documents_router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -63,11 +63,25 @@ class Router:
     async def setup_routes(self):
         """Реєстрація маршрутів у FastAPI"""
 
+        def jwt_auth_dependency(request: Request):
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Токен авторизації обов'язковий")
+            token = auth_header.split(" ")[1]
+            payload = JWTHandler().decode_token(token)
+            if not payload.get("sub"):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Невірний токен")
+            return payload
+
         # Authentication routes (користувачі)
         self.auth_router.post("/register", summary="Реєстрація користувача")(self.auth_handler.register)
         self.auth_router.post("/verify-email", summary="Верифікація email")(self.auth_handler.verify_email)
         self.auth_router.post("/login", summary="Вхід користувача")(self.auth_handler.login)
         self.auth_router.post("/login/oauth2", summary="Вхід через OAuth2 (Google, Apple)")(self.auth_handler.login_oauth2)
+        self.auth_router.get("/google-drive/url", summary="Отримати URL для OAuth авторизації Google Drive")(self.auth_handler.get_google_drive_auth_url)
+        self.auth_router.post("/google-drive/callback", summary="Обробка callback від Google OAuth")(self.auth_handler.handle_google_drive_callback)
+        self.auth_router.get("/google-drive/callback-web", summary="Web callback для Google OAuth")(self.auth_handler.handle_google_drive_callback_web)
+        self.auth_router.post("/refresh", summary="Оновлення токена")(self.auth_handler.refresh_token)
         self.auth_router.post("/oauth2/urls", summary="Отримання OAuth2 URLs")(self.auth_handler.get_oauth2_urls)
         self.auth_router.post("/reset-password", summary="Запит на відновлення паролю")(self.auth_handler.request_password_reset)
         self.auth_router.post("/reset-password/confirm", summary="Підтвердження відновлення паролю")(self.auth_handler.confirm_password_reset)
@@ -81,8 +95,7 @@ class Router:
         self.admin_auth_router.post("/logout", summary="Вихід адміністратора з системи")(self.admin_auth_handler.logout)
 
         # Telegram Auth routes
-        self.tg_auth_router.post("/authenticate", summary="Автентифікація через Telegram")(self.tg_auth_handler.authenticate)
-        self.tg_auth_router.post("/verify-code", summary="Підтвердження коду з Telegram")(self.tg_auth_handler.verify_telegram_code)
+        self.tg_auth_router.post("/widget/authenticate", summary="Автентифікація через Telegram Login Widget")(self.tg_auth_handler.authenticate_widget)
 
         # Properties routes (для гостей)
         self.properties_router.get("/top", summary="Отримати топові пропозиції")(self.properties_handler.get_top_offers)
@@ -93,48 +106,50 @@ class Router:
         # Properties routes (з JWT токеном)
         self.properties_router.get("/my", summary="Мої об'єкти нерухомості")(self.properties_handler.get_my_properties)
         self.properties_router.post("/", summary="Створити об'єкт нерухомості")(self.properties_handler.create_property)
+        self.properties_router.get("/favorites", summary="Отримати обрані об'єкти")(self.properties_handler.get_favorites)
+        self.properties_router.post("/favorites/{property_id}", summary="Додати об'єкт до обраних")(self.properties_handler.add_to_favorites)
+        self.properties_router.delete("/favorites/{property_id}", summary="Видалити об'єкт з обраних")(self.properties_handler.remove_from_favorites)
         self.properties_router.get("/{property_id}", summary="Отримати об'єкт нерухомості за ID")(self.properties_handler.get_property)
         self.properties_router.put("/{property_id}", summary="Оновити об'єкт нерухомості")(self.properties_handler.update_property)
         self.properties_router.delete("/{property_id}", summary="Видалити об'єкт нерухомості")(self.properties_handler.delete_property)
-        self.properties_router.post("/favorites/{property_id}", summary="Додати об'єкт до обраних")(self.properties_handler.add_to_favorites)
-        self.properties_router.delete("/favorites/{property_id}", summary="Видалити об'єкт з обраних")(self.properties_handler.remove_from_favorites)
-        self.properties_router.get("/favorites", summary="Отримати обрані об'єкти")(self.properties_handler.get_favorites)
-        self.properties_router.get("/search-history", summary="Отримати історію пошуку")(self.properties_handler.get_search_history)
 
-        # Agents routes (публічні)
-        self.agents_router.get("/", summary="Отримати список агентів")(self.agents_handler.get_agents)
-        self.agents_router.get("/{agent_id}", summary="Отримати інформацію про агента")(self.agents_handler.get_agent)
-        self.agents_router.post("/apply", summary="Подати заявку на роботу агентом")(self.agents_handler.apply_for_agent)
+        # Admins routes (з JWT токеном)
+        self.admins_router.get("/", summary="Отримати список адмінів", dependencies=[Depends(jwt_auth_dependency)])(self.admin_auth_handler.get_admins)
+        self.admins_router.post("/apply", summary="Подати заявку на роботу адміном")(self.admin_auth_handler.apply_for_admin)
+        self.admins_router.get("/{admin_id}", summary="Отримати інформацію про адміна", dependencies=[Depends(jwt_auth_dependency)])(self.admin_auth_handler.get_admin)
         
-        # Agents routes (з JWT токеном)
-        self.agents_router.post("/", summary="Створити агента")(self.agents_handler.create_agent)
-        self.agents_router.put("/{agent_id}", summary="Оновити інформацію про агента")(self.agents_handler.update_agent)
-        self.agents_router.delete("/{agent_id}", summary="Видалити агента")(self.agents_handler.delete_agent)
-        
-        # Training programs routes
-        self.agents_router.get("/training-programs", summary="Отримати програми підготовки агентів")(self.agents_handler.get_training_programs)
-        self.agents_router.get("/training-programs/{program_id}", summary="Отримати програму підготовки за ID")(self.agents_handler.get_training_program)
-        
-        # Clients routes (з JWT токеном)
-        self.clients_router.get("/", summary="Отримати список клієнтів")(self.clients_handler.get_clients)
-        self.clients_router.post("/", summary="Створити клієнта")(self.clients_handler.create_client)
-        self.clients_router.get("/{client_id}", summary="Отримати клієнта за ID")(self.clients_handler.get_client)
-        self.clients_router.put("/{client_id}", summary="Оновити клієнта")(self.clients_handler.update_client)
-        self.clients_router.delete("/{client_id}", summary="Видалити клієнта")(self.clients_handler.delete_client)
+        # Training programs routes (з JWT токеном)
+        self.admins_router.get("/training-programs", summary="Отримати програми підготовки адмінів", dependencies=[Depends(jwt_auth_dependency)])(self.admin_auth_handler.get_training_programs)
+        self.admins_router.get("/training-programs/{program_id}", summary="Отримати програму підготовки за ID", dependencies=[Depends(jwt_auth_dependency)])(self.admin_auth_handler.get_training_program)
+        self.admins_router.post("/training-programs", summary="Створити програму підготовки", dependencies=[Depends(jwt_auth_dependency)])(self.admin_auth_handler.create_training_program)
+        self.admins_router.put("/training-programs/{program_id}", summary="Оновити програму підготовки", dependencies=[Depends(jwt_auth_dependency)])(self.admin_auth_handler.update_training_program)
+        self.admins_router.delete("/training-programs/{program_id}", summary="Видалити програму підготовки", dependencies=[Depends(jwt_auth_dependency)])(self.admin_auth_handler.delete_training_program)
+        self.admins_router.post("/", summary="Створити адміна", dependencies=[Depends(jwt_auth_dependency)])(self.admin_auth_handler.create_admin)
+        self.admins_router.put("/{admin_id}", summary="Оновити інформацію про адміна", dependencies=[Depends(jwt_auth_dependency)])(self.admin_auth_handler.update_admin)
+        self.admins_router.delete("/{admin_id}", summary="Видалити адміна", dependencies=[Depends(jwt_auth_dependency)])(self.admin_auth_handler.delete_admin)
+
+        # Users routes (з JWT токеном)
+        self.users_router.get("/", summary="Отримати список користувачів")(self.users_handler.get_users)
+        self.users_router.post("/", summary="Створити користувача")(self.users_handler.create_user)
+        self.users_router.get("/{user_id}", summary="Отримати користувача за ID")(self.users_handler.get_user)
+        self.users_router.put("/{user_id}", summary="Оновити користувача")(self.users_handler.update_user)
+        self.users_router.delete("/{user_id}", summary="Видалити користувача")(self.users_handler.delete_user)
 
         # Deals routes (з JWT токеном)
         self.deals_router.get("/", summary="Отримати список угод")(self.deals_handler.get_deals)
         self.deals_router.post("/", summary="Створити угоду")(self.deals_handler.create_deal)
-        self.deals_router.get("/{deal_id}", summary="Отримати угоду за ID")(self.deals_handler.get_deal)
-        self.deals_router.put("/{deal_id}", summary="Оновити угоду")(self.deals_handler.update_deal)
-        self.deals_router.delete("/{deal_id}", summary="Видалити угоду")(self.deals_handler.delete_deal)
         
-        # Activity Journal routes (з JWT токеном)
+        # Activity Journal routes (з JWT токеном) - ПЕРЕД /{deal_id}
+        self.deals_router.get("/activity-codes", summary="Отримати коди для журналу активності")(self.deals_handler.get_activity_codes)
         self.deals_router.get("/activity-journal", summary="Отримати журнал активності")(self.deals_handler.get_activity_journal)
         self.deals_router.post("/activity-journal", summary="Додати запис до журналу активності")(self.deals_handler.add_activity_journal_entry)
         self.deals_router.get("/activity-journal/{entry_id}", summary="Отримати запис журналу за ID")(self.deals_handler.get_activity_journal_entry)
         self.deals_router.put("/activity-journal/{entry_id}", summary="Оновити запис журналу")(self.deals_handler.update_activity_journal_entry)
         self.deals_router.delete("/activity-journal/{entry_id}", summary="Видалити запис журналу")(self.deals_handler.delete_activity_journal_entry)
+        
+        self.deals_router.get("/{deal_id}", summary="Отримати угоду за ID")(self.deals_handler.get_deal)
+        self.deals_router.put("/{deal_id}", summary="Оновити угоду")(self.deals_handler.update_deal)
+        self.deals_router.delete("/{deal_id}", summary="Видалити угоду")(self.deals_handler.delete_deal)
 
         # Calendar routes (з JWT токеном)
         self.calendar_router.get("/events", summary="Отримати події календаря")(self.calendar_handler.get_events)
@@ -146,14 +161,20 @@ class Router:
         # Documents routes (з JWT токеном)
         self.documents_router.get("/", summary="Отримати список документів")(self.documents_handler.get_documents)
         self.documents_router.post("/", summary="Завантажити документ")(self.documents_handler.upload_document)
+        
+        # Document templates routes (МАЮТЬ БУТИ ПЕРЕД {document_id})
+        self.documents_router.get("/templates", summary="Отримати шаблони документів")(self.documents_handler.get_document_templates)
+        self.documents_router.post("/templates", summary="Створити шаблон документа")(self.documents_handler.create_document_template)
+        self.documents_router.post("/templates/upload-docx", summary="Завантажити .docx шаблон з автопарсингом")(self.documents_handler.upload_document_template_from_file)
+        self.documents_router.get("/templates/{template_id}", summary="Отримати шаблон за ID")(self.documents_handler.get_template)
+        self.documents_router.put("/templates/{template_id}", summary="Оновити шаблон документа")(self.documents_handler.update_document_template)
+        self.documents_router.delete("/templates/{template_id}", summary="Видалити шаблон документа")(self.documents_handler.delete_document_template)
+        self.documents_router.post("/templates/{template_id}/generate", summary="Згенерувати документ з шаблона")(self.documents_handler.generate_document_from_template)
+        self.documents_router.post("/templates/{template_id}/generate-docx", summary="Згенерувати .docx документ з шаблона")(self.documents_handler.generate_docx_from_template)
+        
         self.documents_router.get("/{document_id}", summary="Отримати документ за ID")(self.documents_handler.get_document)
         self.documents_router.put("/{document_id}", summary="Оновити документ")(self.documents_handler.update_document)
         self.documents_router.delete("/{document_id}", summary="Видалити документ")(self.documents_handler.delete_document)
-        
-        # Document templates routes
-        self.documents_router.get("/templates", summary="Отримати шаблони документів")(self.documents_handler.get_document_templates)
-        self.documents_router.post("/templates", summary="Створити шаблон документа")(self.documents_handler.create_document_template)
-        self.documents_router.post("/templates/{template_id}/generate", summary="Згенерувати документ з шаблона")(self.documents_handler.generate_document_from_template)
 
         # Marketing routes (з JWT токеном)
         self.marketing_router.get("/campaigns", summary="Отримати маркетингові кампанії")(self.marketing_handler.get_campaigns)
@@ -174,7 +195,7 @@ class Router:
         self.analytics_router.get("/sales-report", summary="Звіт з продажів")(self.analytics_handler.get_sales_report)
         self.analytics_router.get("/properties", summary="Аналітика нерухомості")(self.analytics_handler.get_properties_analytics)
         self.analytics_router.get("/marketing", summary="Маркетингова аналітика")(self.analytics_handler.get_marketing_analytics)
-        self.analytics_router.get("/agents-performance", summary="Аналітика продуктивності агентів")(self.analytics_handler.get_agents_performance)
+        self.analytics_router.get("/admins-performance", summary="Аналітика продуктивності адмінів")(self.analytics_handler.get_admins_performance)
         self.analytics_router.get("/export-report", summary="Експортувати звіт")(self.analytics_handler.export_report)
 
         # User Profile routes (з JWT токеном)
@@ -195,35 +216,33 @@ class Router:
 
         # Parsed Listings routes (з JWT токеном)
         self.parsed_listings_router.get("/", summary="Отримати спарсені оголошення")(self.parsed_listings_handler.get_parsed_listings)
-        self.parsed_listings_router.get("/stats", summary="Отримати статистику по спарсеним оголошенням")(self.parsed_listings_handler.get_parsed_listings_stats)
         self.parsed_listings_router.get("/{listing_id}", summary="Отримати спарсене оголошення за ID")(self.parsed_listings_handler.get_parsed_listing)
         self.parsed_listings_router.post("/", summary="Створити спарсене оголошення")(self.parsed_listings_handler.create_parsed_listing)
-        self.parsed_listings_router.put("/{listing_id}/status", summary="Оновити статус спарсеного оголошення")(self.parsed_listings_handler.update_parsed_listing_status)
         self.parsed_listings_router.post("/{listing_id}/convert", summary="Конвертувати в об'єкт нерухомості")(self.parsed_listings_handler.convert_to_property)
         self.parsed_listings_router.delete("/{listing_id}", summary="Видалити спарсене оголошення")(self.parsed_listings_handler.delete_parsed_listing)
-        self.parsed_listings_router.get("/sources", summary="Отримати джерела парсингу")(self.parsed_listings_handler.get_parsing_sources)
-        self.parsed_listings_router.post("/tasks", summary="Запустити задачу парсингу")(self.parsed_listings_handler.start_parsing_task)
-        self.parsed_listings_router.get("/tasks/{task_id}", summary="Отримати статус задачі парсингу")(self.parsed_listings_handler.get_parsing_task_status)
 
         # Smart Search routes (публічні)
         self.smart_search_router.get("/", summary="Розумний пошук нерухомості")(self.smart_search_handler.smart_search)
         self.smart_search_router.post("/embeddings/create", summary="Створити векторні ембединги")(self.smart_search_handler.create_embeddings)
-        self.smart_search_router.put("/embeddings/{collection}/{record_id}", summary="Оновити ембединг для запису")(self.smart_search_handler.update_embedding_for_record)
 
         # AI Assistant routes (з JWT токеном)
         self.ai_assistant_router.get("/property/{property_id}/matches", summary="AI аналіз: топ клієнтів для нерухомості")(self.ai_assistant_handler.get_property_client_matches)
-        self.ai_assistant_router.get("/daily-tasks", summary="Отримання щоденних задач агента")(self.ai_assistant_handler.get_daily_agent_tasks)
-        self.ai_assistant_router.put("/agent/{agent_id}/tasks/{date}", summary="Оновлення щоденних задач агента")(self.ai_assistant_handler.update_daily_tasks)
-        self.ai_assistant_router.post("/admin/bulk-generate-tasks", summary="Масове генерування задач для всіх агентів")(self.ai_assistant_handler.bulk_generate_daily_tasks)
+        self.ai_assistant_router.get("/daily-tasks", summary="Отримання щоденних задач адміна")(self.ai_assistant_handler.get_daily_admin_tasks)
+        self.ai_assistant_router.put("/admin/{admin_id}/tasks/{date}", summary="Оновлення щоденних задач адміна")(self.ai_assistant_handler.update_daily_tasks)
+        self.ai_assistant_router.post("/admin/bulk-generate-tasks", summary="Масове генерування задач для всіх адмінів")(self.ai_assistant_handler.bulk_generate_daily_tasks)
         self.ai_assistant_router.delete("/admin/cleanup-expired-tasks", summary="Видалення застарілих задач (3+ місяці)")(self.ai_assistant_handler.cleanup_expired_tasks)
+        
+        # Фонові задачі (тільки для тестування)
+        self.ai_assistant_router.post("/admin/test-generate-tasks", summary="Тестова генерація задач")(self.test_generate_tasks)
+        self.ai_assistant_router.post("/admin/test-cleanup-tasks", summary="Тестове очищення задач")(self.test_cleanup_tasks)
 
-        # Додаємо роутери в FastAPI додаток без префіксу (nginx додасть /kovcheg/)
+        # Додаємо роутери в FastAPI додасть /kovcheg/)
         self.app.include_router(self.auth_router)
         self.app.include_router(self.admin_auth_router)
         self.app.include_router(self.tg_auth_router)
         self.app.include_router(self.properties_router)
-        self.app.include_router(self.agents_router)
-        self.app.include_router(self.clients_router)
+        self.app.include_router(self.admins_router) # Змінено з admins_router на admins_router
+        self.app.include_router(self.users_router)
         self.app.include_router(self.deals_router)
         self.app.include_router(self.calendar_router)
         self.app.include_router(self.documents_router)
@@ -233,6 +252,18 @@ class Router:
         self.app.include_router(self.parsed_listings_router)
         self.app.include_router(self.smart_search_router)
         self.app.include_router(self.ai_assistant_router)
+        
+    async def test_generate_tasks(self, request: Request):
+        """Тестова генерація задач."""
+        from api.background_tasks import background_manager
+        result = await background_manager.manual_generate_tasks()
+        return JSONResponse(content=result)
+        
+    async def test_cleanup_tasks(self, request: Request):
+        """Тестове очищення задач."""
+        from api.background_tasks import background_manager
+        result = await background_manager.manual_cleanup_tasks()
+        return JSONResponse(content=result)
         
     async def handle_options_login(self):
         """Обробник OPTIONS запитів для /auth/login"""

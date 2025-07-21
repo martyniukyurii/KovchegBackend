@@ -369,7 +369,7 @@ class MarketingEndpoints:
                 "notes": data.get("notes", ""),
                 "status": "new",
                 "score": data.get("score", 0),
-                "assigned_agent_id": data.get("assigned_agent_id"),
+                "assigned_admin_id": data.get("assigned_admin_id"),
                 "created_by": user_id,
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
@@ -464,7 +464,7 @@ class MarketingEndpoints:
             # Поля, які можна оновити
             updatable_fields = [
                 "name", "contact", "interest", "budget", "notes", 
-                "status", "score", "assigned_agent_id"
+                "status", "score", "assigned_admin_id"
             ]
             for field in updatable_fields:
                 if field in data:

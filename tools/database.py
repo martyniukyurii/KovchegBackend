@@ -21,14 +21,18 @@ class SyncDatabase:
     def _get_client(self) -> MongoClient:
         """Повертає синхронного клієнта MongoDB."""
         if not self._client:
-            # Додаємо SSL параметри для MongoDB Atlas
+            # Додаємо SSL параметри для MongoDB Atlas з збільшеними таймаутами
             self._client = MongoClient(
                 self.uri,
                 tls=True,
                 tlsAllowInvalidCertificates=True,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=10000,
-                socketTimeoutMS=20000
+                serverSelectionTimeoutMS=30000,  # Збільшено з 10000 до 30000
+                connectTimeoutMS=60000,          # Збільшено з 30000 до 60000
+                socketTimeoutMS=120000,          # Збільшено з 60000 до 120000
+                maxPoolSize=10,
+                retryWrites=True,
+                heartbeatFrequencyMS=30000,      # Додано для кращої стабільності
+                maxIdleTimeMS=60000              # Додано для економії ресурсів
             )
         return self._client
 
@@ -107,31 +111,41 @@ class Database:
         # Ініціалізація властивостей для колекцій
         self.users = CollectionHandler(self, "users")
         self.verification_codes = CollectionHandler(self, "verification_codes")
-        self.admins = CollectionHandler(self, "admins")
+        self.admins = CollectionHandler(self, "admins")  # Об'єднана колекція admins + admins
+        self.admin_applications = CollectionHandler(self, "admin_applications")
         self.properties = CollectionHandler(self, "properties")
-        self.agents = CollectionHandler(self, "agents")
+        self.property_likes = CollectionHandler(self, "property_likes")  # Нова колекція для лайків
         self.deals = CollectionHandler(self, "deals")
         self.calendar_events = CollectionHandler(self, "calendar_events")
         self.documents = CollectionHandler(self, "documents")
+        self.document_templates = CollectionHandler(self, "document_templates")
         self.marketing_campaigns = CollectionHandler(self, "marketing_campaigns")
         self.notifications = CollectionHandler(self, "notifications")
         self.training_programs = CollectionHandler(self, "training_programs")
         self.activity_journal = CollectionHandler(self, "activity_journal")
         self.parsed_listings = CollectionHandler(self, "parsed_listings")
-        self.agent_daily_tasks = CollectionHandler(self, "agent_daily_tasks")
+        self.admin_daily_tasks = CollectionHandler(self, "admin_daily_tasks")
         self.logs = CollectionHandler(self, "logs")
+        self.docs_sell_requests = CollectionHandler(self, "docs_sell_requests")
+        
+        # Додаємо властивість admins для сумісності (посилається на admins з role="admin")
+        self.admins = self.admins
 
     async def _get_client(self) -> AsyncIOMotorClient:
         """Повертає асинхронного клієнта MongoDB."""
         if not self._client:
-            # Додаємо SSL параметри для MongoDB Atlas
+            # Додаємо SSL параметри для MongoDB Atlas з збільшеними таймаутами
             self._client = AsyncIOMotorClient(
                 self.uri,
                 tls=True,
                 tlsAllowInvalidCertificates=True,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=10000,
-                socketTimeoutMS=20000
+                serverSelectionTimeoutMS=30000,  # Збільшено з 10000 до 30000
+                connectTimeoutMS=60000,          # Збільшено з 30000 до 60000
+                socketTimeoutMS=120000,          # Збільшено з 60000 до 120000
+                maxPoolSize=10,
+                retryWrites=True,
+                heartbeatFrequencyMS=30000,      # Додано для кращої стабільності
+                maxIdleTimeMS=60000              # Додано для економії ресурсів
             )
         return self._client
 
@@ -161,32 +175,42 @@ class Database:
             await db.properties.create_index([("price.amount", 1)])
             await db.properties.create_index([("status.for_sale", 1)])
             await db.properties.create_index([("status.for_rent", 1)])
-            await db.properties.create_index([("agent_id", 1)])
+            await db.properties.create_index([("admin_id", 1)])
             await db.properties.create_index([("owner_id", 1)])
             
-            # Індекси для agents
-            await db.agents.create_index([("user_id", 1)], unique=True)
+            # Індекси для admins (об'єднана колекція admins + admins)
+            await db.admins.create_index([("telegram_id", 1)], sparse=True)
+            await db.admins.create_index([("email", 1)], sparse=True)
+            await db.admins.create_index([("role", 1)])
+            await db.admins.create_index([("user_id", 1)], sparse=True)  # Для адмінів
+            await db.admins.create_index([("status", 1)], sparse=True)   # Для адмінів
+            await db.admins.create_index([("rating", 1)], sparse=True)   # Для адмінів
+            
+            # Індекси для admin_applications
+            await db.admin_applications.create_index([("telegram_id", 1)])
+            await db.admin_applications.create_index([("status", 1)])
+            await db.admin_applications.create_index([("created_at", 1)])
             
             # Індекси для users (включаючи клієнтські поля)
-            await db.users.create_index([("assigned_agent_id", 1)], sparse=True)
+            await db.users.create_index([("assigned_admin_id", 1)], sparse=True)  # Посилається на admins._id з role="admin"
             await db.users.create_index([("user_type", 1)])
             await db.users.create_index([("client_status", 1)], sparse=True)
             
             # Індекси для deals
             await db.deals.create_index([("property_id", 1)])
-            await db.deals.create_index([("agent_id", 1)])
+            await db.deals.create_index([("admin_id", 1)])  # Посилається на admins._id з role="admin"
             await db.deals.create_index([("seller_id", 1)])
             await db.deals.create_index([("buyer_id", 1)])
             
             # Індекси для calendar_events
             await db.calendar_events.create_index([("start_time", 1)])
-            await db.calendar_events.create_index([("participants.agents", 1)])
+            await db.calendar_events.create_index([("participants.admins", 1)])  # Посилається на admins._id з role="admin"
             await db.calendar_events.create_index([("participants.clients", 1)])
             
             # Індекси для activity_journal
             await db.activity_journal.create_index([("timestamp", 1)])
             await db.activity_journal.create_index([("related_to.id", 1)])
-            await db.activity_journal.create_index([("participants.agents", 1)])
+            await db.activity_journal.create_index([("participants.admins", 1)])  # Посилається на admins._id з role="admin"
             await db.activity_journal.create_index([("participants.clients", 1)])
             
             # Індекси для parsed_listings
@@ -195,12 +219,23 @@ class Database:
             await db.parsed_listings.create_index([("parsed_at", 1)])
             await db.parsed_listings.create_index([("is_active", 1)])
             
-            # Індекси для agent_daily_tasks
-            await db.agent_daily_tasks.create_index([("agent_id", 1), ("date", 1)], unique=True)
-            await db.agent_daily_tasks.create_index([("expires_at", 1)], expireAfterSeconds=0)  # TTL індекс
+            # Індекси для admin_daily_tasks
+            await db.admin_daily_tasks.create_index([("admin_id", 1), ("date", 1)], unique=True)  # Посилається на admins._id з role="admin"
+            await db.admin_daily_tasks.create_index([("expires_at", 1)], expireAfterSeconds=0)  # TTL індекс
 
             # TTL для логів (7 днів)
             await db.logs.create_index([("timestamp", 1)], expireAfterSeconds=604800)  # 7 днів
+
+            # Індекси для docs_sell_requests
+            await db.docs_sell_requests.create_index([("contact_phone", 1)])
+            await db.docs_sell_requests.create_index([("status", 1)])
+            await db.docs_sell_requests.create_index([("created_at", 1)])
+
+            # Індекси для property_likes
+            await db.property_likes.create_index([("user_id", 1)])
+            await db.property_likes.create_index([("property_id", 1)])
+            await db.property_likes.create_index([("user_id", 1), ("property_id", 1)], unique=True)  # Унікальність лайка
+            await db.property_likes.create_index([("created_at", 1)])
 
             logger.info("Індекси успішно створено")
         except Exception as e:
@@ -286,15 +321,15 @@ class CollectionHandler:
             logger.error(f"Error updating documents in {self.collection_name}: {e}")
             return 0
 
-    async def update_one(self, query: Dict, update_data: Dict, user: Optional[Dict] = None) -> int:
+    async def update_one(self, query: Dict, update_data: Dict, user: Optional[Dict] = None, upsert: bool = False) -> int:
         """Оновлює один документ в колекції."""
         try:
             collection = await self.db._get_collection(self.collection_name, user)
             # Якщо update_data вже містить MongoDB оператори, використовуємо як є
             if any(key.startswith('$') for key in update_data.keys()):
-                result = await collection.update_one(query, update_data)
+                result = await collection.update_one(query, update_data, upsert=upsert)
             else:
-                result = await collection.update_one(query, {"$set": update_data})
+                result = await collection.update_one(query, {"$set": update_data}, upsert=upsert)
             return result.modified_count
         except Exception as e:
             logger.error(f"Error updating document in {self.collection_name}: {e}")
@@ -309,6 +344,10 @@ class CollectionHandler:
         except Exception as e:
             logger.error(f"Error deleting documents from {self.collection_name}: {e}")
             return 0
+
+    async def delete_many(self, query: Dict, user: Optional[Dict] = None) -> int:
+        """Видаляє багато документів з колекції (alias для delete)."""
+        return await self.delete(query, user)
 
     async def find_one(self, query: Dict, user: Optional[Dict] = None) -> Optional[Dict]:
         """Знаходить один документ в колекції."""

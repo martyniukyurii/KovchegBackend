@@ -42,7 +42,7 @@ class EmailService:
                 "welcome_message": "Ваш акаунт успішно створено та верифіковано!",
                 "welcome_features": "Тепер ви можете користуватися всіма можливостями платформи Ваш Ковчег:",
                 "feature_search": "🏠 Пошук нерухомості",
-                "feature_agents": "💼 Робота з агентами",
+                "feature_admins": "💼 Робота з адмінами",
                 "feature_analytics": "📊 Аналітика ринку",
                 "feature_ai": "🤖 AI-асистент",
                 "welcome_wishes": "Бажаємо вам успішних угод!"
@@ -71,7 +71,7 @@ class EmailService:
                 "welcome_message": "Ваш аккаунт успешно создан и верифицирован!",
                 "welcome_features": "Теперь вы можете пользоваться всеми возможностями платформы Ваш Ковчег:",
                 "feature_search": "🏠 Поиск недвижимости",
-                "feature_agents": "💼 Работа с агентами",
+                "feature_admins": "💼 Работа с адмінами",
                 "feature_analytics": "📊 Аналитика рынка",
                 "feature_ai": "🤖 AI-ассистент",
                 "welcome_wishes": "Желаем вам успешных сделок!"
@@ -100,7 +100,7 @@ class EmailService:
                 "welcome_message": "Your account has been successfully created and verified!",
                 "welcome_features": "Now you can use all the features of the Ваш Ковчег platform:",
                 "feature_search": "🏠 Property Search",
-                "feature_agents": "💼 Work with Agents",
+                "feature_admins": "💼 Work with Admins",
                 "feature_analytics": "📊 Market Analytics",
                 "feature_ai": "🤖 AI Assistant",
                 "welcome_wishes": "We wish you successful deals!"
@@ -275,7 +275,7 @@ class EmailService:
                         <p>{t["welcome_message"]}</p>
                         <p>{t["welcome_features"]}</p>
                         <div class="feature">{t["feature_search"]}</div>
-                        <div class="feature">{t["feature_agents"]}</div>
+                        <div class="feature">{t["feature_admins"]}</div>
                         <div class="feature">{t["feature_analytics"]}</div>
                         <div class="feature">{t["feature_ai"]}</div>
                         <p>{t["welcome_wishes"]}</p>

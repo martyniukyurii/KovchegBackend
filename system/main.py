@@ -1,40 +1,45 @@
-import asyncio
-import json
-import signal
-import sys
 import os
-from pathlib import Path
+import sys
+import signal
+import json
+import asyncio
 from datetime import datetime, time
+from pathlib import Path
 from typing import List, Dict
-from dotenv import load_dotenv
 
-# Налаштування для серверного середовища
-os.environ.setdefault('DISPLAY', ':99')
-os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', '/home/ubuntu/.cache/ms-playwright')
-
-if sys.platform.startswith('linux'):
+# Виправлення для Python 3.9 на macOS
+if sys.platform == 'darwin' and sys.version_info[:2] == (3, 9):
     import asyncio
-    # Встановлюємо event loop policy для Linux серверів
-    try:
-        import uvloop
-        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-    except ImportError:
-        # Якщо uvloop недоступний, використовуємо стандартний
-        asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+    import selectors
+    
+    # КРИТИЧНЕ: відключаємо child watcher на macOS
+    class NoOpChildWatcher:
+        def add_child_handler(self, *args, **kwargs): pass
+        def remove_child_handler(self, *args, **kwargs): pass
+        def attach_loop(self, *args, **kwargs): pass
+        def close(self): pass
+        def is_active(self): return True
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    
+    # Встановлюємо selector event loop і відключаємо child watcher
+    selector = selectors.SelectSelector()
+    loop = asyncio.SelectorEventLoop(selector)
+    asyncio.set_event_loop(loop)
+    
+    # Патч для child watcher
+    original_get_child_watcher = asyncio.events.get_child_watcher
+    def patched_get_child_watcher():
+        return NoOpChildWatcher()
+    asyncio.events.get_child_watcher = patched_get_child_watcher
 
-# Завантажуємо змінні середовища
-load_dotenv()
-
-# Додаємо кореневу директорію до Python path
+# Додаємо шлях до кореневої папки проекту
 sys.path.append(str(Path(__file__).parent.parent))
 
-# Тепер імпортуємо все після налаштування path
+from system.parsers.olx_parser import OLXParser
+from system.parsers.m2bomber_parser import M2BomberParser
 from tools.logger import Logger
 from tools.database import SyncDatabase
-
-# Імпортуємо парсери після налаштування path
-from parsers.olx_parser import OLXParser
-from parsers.m2bomber_parser import M2BomberParser
 
 class PropertyParserManager:
     def __init__(self):
@@ -85,14 +90,14 @@ class PropertyParserManager:
         
         try:
             parser = OLXParser()
-            await parser.init_browser()
+            # Видаляємо init_browser - тепер це робиться в parse_all_olx_urls
             
             # Фільтруємо OLX посилання
             olx_links = [link for link in self.links_data if link.get('site') == 'OLX']
             
             results = await parser.parse_all_olx_urls(olx_links)
             
-            await parser.close_browser()
+            # Видаляємо close_browser - тепер це робиться автоматично
             
             # Повідомлення вже відправлені в Telegram в парсері
             

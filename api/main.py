@@ -1,12 +1,26 @@
 import sys
 import os
+import asyncio
+from datetime import datetime, time
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from api.router import Router
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from bot.telegram_bot import TelegramBot
+
+# Додавання ліфспен подій
+from contextlib import asynccontextmanager
+
+# Додаємо стандартний CORS middleware як резервний варіант
+from tools.database import Database
+from tools.logger import Logger
+
+logger = Logger()
 
 
 class CustomCorsMiddleware(BaseHTTPMiddleware):
@@ -37,13 +51,43 @@ class CustomCorsMiddleware(BaseHTTPMiddleware):
         return response
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Управління життєвим циклом додатка"""
+    # Startup
+    logger.info("🚀 Запуск API сервера...")
+    
+    # Ініціалізація бази даних
+    db = Database()
+    await db.setup_indexes()
+    
+    # Запуск фонових задач
+    from api.background_tasks import background_manager
+    await background_manager.start()
+    
+    try:
+        yield
+    finally:
+        # Shutdown
+        logger.info("🛑 Зупинка API сервера...")
+        await background_manager.stop()
+
+# Оновлюємо FastAPI app щоб використовувати lifespan
 app = FastAPI(
-    title="Kovcheg API",
+    title="Kovcheg Backend API",
+    description="API для системи керування нерухомістю",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    redoc_url="/redoc", 
+    openapi_url="/openapi.json",
+    lifespan=lifespan
 )
+
+# Додаємо статичні файли
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if not os.path.exists(static_dir):
+    os.makedirs(static_dir)
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # Додаємо наш власний CORS middleware
 app.add_middleware(CustomCorsMiddleware)
@@ -64,6 +108,10 @@ async def startup_event():
     """Виконується при старті застосунку"""
     router = Router(app)
     await router.initialize()
+    
+    # Запускаємо Telegram бота в фоновому режимі
+    telegram_bot = TelegramBot()
+    asyncio.create_task(telegram_bot.start_admin_bot())
 
 if __name__ == "__main__":
     print("🚀 Запуск Kovcheg API сервера...")

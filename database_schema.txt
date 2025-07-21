@@ -26,7 +26,7 @@ DB: VashKovchegCRM
 │   │   ├── telegram
 │   │   └── email
 │   ├── client_status (active, inactive, lead)
-│   ├── assigned_agent_id (references agents._id)
+│   ├── assigned_agent_id (references admins._id з role="agent")
 │   ├── client_interests
 │   ├── client_budget
 │   ├── client_preferred_locations
@@ -40,24 +40,57 @@ DB: VashKovchegCRM
 │   └── created_by (references users._id, для клієнтів створених агентами)
 ├── verification_codes
 │   ├── _id (primary key)
-│   ├── user_id (references users._id)
+│   ├── user_id (references users._id, nullable)
+│   ├── admin_id (references admins._id, nullable)
+│   ├── telegram_id (nullable)
 │   ├── code
 │   ├── created_at
 │   ├── expires_at
-│   └── email
-├── admins
+│   ├── email (nullable)
+│   └── type (email_verification, password_reset, admin_login, owner_registration, admin_password_reset)
+├── admins (об'єднана колекція для адмінів)
 │   ├── _id (primary key)
 │   ├── first_name
 │   ├── last_name
-│   ├── email
+│   ├── email (nullable для Telegram-only адмінів)
 │   ├── phone
 │   ├── created_at
+│   ├── updated_at
 │   ├── login
-│   ├── password
+│   ├── password (nullable для Telegram-only адмінів)
 │   ├── language_code
 │   ├── is_verified
-│   ├── role
-│   └── telegram_id
+│   ├── role (admin, owner)
+│   ├── telegram_id (nullable)
+│   ├── telegram_username (nullable)
+│   ├── telegram_photo_url (nullable)
+│   ├── user_id (nullable, references users._id)
+│   ├── bio (nullable)
+│   ├── experience_years (nullable)
+│   ├── specializations (nullable)
+│   ├── certifications (nullable)
+│   ├── rating (nullable)
+│   ├── reviews_count (nullable)
+│   ├── properties_sold (nullable)
+│   ├── properties_rented (nullable)
+│   ├── active_listings (nullable)
+│   ├── status (nullable: active, inactive)
+│   └── training_programs (nullable)
+│       └── [program_ids] (references training_programs._id)
+├── admin_applications
+│   ├── _id (primary key)
+│   ├── telegram_id
+│   ├── email
+│   ├── first_name
+│   ├── last_name
+│   ├── username (Telegram username)
+│   ├── created_at
+│   ├── status (pending, approved, rejected)
+│   ├── type (admin_application)
+│   ├── approved_by (references admins._id, nullable)
+│   ├── approved_at (nullable)
+│   ├── rejected_by (references admins._id, nullable)
+│   └── rejected_at (nullable)
 ├── properties
 │   ├── _id (primary key)
 │   ├── title
@@ -97,7 +130,7 @@ DB: VashKovchegCRM
 │   │   ├── videos
 │   │   └── virtual_tour_url
 │   ├── owner_id (references users._id)
-│   ├── agent_id (references agents._id)
+│   ├── agent_id (references admins._id з role="agent")
 │   ├── created_at
 │   ├── updated_at
 │   ├── views_count
@@ -105,27 +138,13 @@ DB: VashKovchegCRM
 │   ├── parsed_listing_id (references parsed_listings._id, optional)
 │   └── metadata
 │       └── parsed_source
-├── agents
-│   ├── _id (primary key)
-│   ├── user_id (references users._id)
-│   ├── bio
-│   ├── experience_years
-│   ├── specializations
-│   ├── certifications
-│   ├── rating
-│   ├── reviews_count
-│   ├── properties_sold
-│   ├── properties_rented
-│   ├── active_listings
-│   └── training_programs
-│       └── [program_ids] (references training_programs._id)
 
 ├── deals
 │   ├── _id (primary key)
 │   ├── property_id (references properties._id)
 │   ├── seller_id (references users._id)
 │   ├── buyer_id (references users._id)
-│   ├── agent_id (references agents._id)
+│   ├── agent_id (references admins._id з role="agent")
 │   ├── deal_type
 │   ├── status
 │   ├── price
@@ -144,8 +163,8 @@ DB: VashKovchegCRM
 │   ├── end_time
 │   ├── location
 │   ├── participants
-│   │   ├── agents (references agents._id)
-│   │   └── clients (references clients._id)
+│   │   ├── agents (references admins._id з role="agent")
+│   │   └── clients (references users._id)
 │   ├── property_id (references properties._id, optional)
 │   ├── created_by (references users._id or admins._id)
 │   ├── created_at
@@ -226,8 +245,8 @@ DB: VashKovchegCRM
     │   │   └── other
     │   └── id (references various collections based on type)
     ├── participants
-    │   ├── agents (references agents._id)
-    │   ├── clients (references clients._id)
+    │   ├── agents (references admins._id з role="agent")
+    │   ├── clients (references users._id)
     │   └── admins (references admins._id)
     ├── location
     ├── attachments
@@ -300,7 +319,7 @@ DB: VashKovchegCRM
     └── raw_data
 ├── agent_daily_tasks
     ├── _id (primary key)
-    ├── agent_id (references agents._id)
+    ├── agent_id (references admins._id з role="agent")
     ├── date (YYYY-MM-DD format)
     ├── tasks
     │   └── [
@@ -311,7 +330,7 @@ DB: VashKovchegCRM
     │       ├── description
     │       ├── estimated_time (minutes)
     │       ├── status (pending, in_progress, completed, cancelled)
-    │       ├── client_id (references clients._id, optional)
+    │       ├── client_id (references users._id, optional)
     │       ├── property_id (references properties._id, optional)
     │       ├── deal_id (references deals._id, optional)
     │       ├── created_at

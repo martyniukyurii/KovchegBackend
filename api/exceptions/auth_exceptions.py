@@ -35,10 +35,6 @@ class AuthErrorCode(Enum):
     PROPERTY_NOT_FOUND = "PROPERTY_NOT_FOUND"
     PROPERTY_ALREADY_EXISTS = "PROPERTY_ALREADY_EXISTS"
     
-    # Помилки агентів
-    AGENT_NOT_FOUND = "AGENT_NOT_FOUND"
-    AGENT_ALREADY_EXISTS = "AGENT_ALREADY_EXISTS"
-    
     # Помилки клієнтів
     CLIENT_NOT_FOUND = "CLIENT_NOT_FOUND"
     CLIENT_ALREADY_EXISTS = "CLIENT_ALREADY_EXISTS"
@@ -161,11 +157,11 @@ class AuthException(HTTPException):
             
             # Помилки адміністратора
             AuthErrorCode.ADMIN_NOT_FOUND: {
-                "detail": "Адміністратора не знайдено",
+                "detail": "Адміна не знайдено",
                 "status_code": status.HTTP_404_NOT_FOUND
             },
             AuthErrorCode.ADMIN_ALREADY_EXISTS: {
-                "detail": "Адміністратор з таким email вже існує",
+                "detail": "Адмін з такими даними вже існує",
                 "status_code": status.HTTP_409_CONFLICT
             },
             AuthErrorCode.ADMIN_NOT_VERIFIED: {
@@ -180,16 +176,6 @@ class AuthException(HTTPException):
             },
             AuthErrorCode.PROPERTY_ALREADY_EXISTS: {
                 "detail": "Об'єкт нерухомості з такими параметрами вже існує",
-                "status_code": status.HTTP_409_CONFLICT
-            },
-            
-            # Помилки агентів
-            AuthErrorCode.AGENT_NOT_FOUND: {
-                "detail": "Агента не знайдено",
-                "status_code": status.HTTP_404_NOT_FOUND
-            },
-            AuthErrorCode.AGENT_ALREADY_EXISTS: {
-                "detail": "Агент з таким email вже існує",
                 "status_code": status.HTTP_409_CONFLICT
             },
             

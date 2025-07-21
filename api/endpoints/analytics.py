@@ -31,10 +31,10 @@ class AnalyticsEndpoints:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
             # Підрахунок основних метрик
-            total_properties = await self.db.properties.count({"status": "active"})
+            total_properties = await self.db.properties.count_documents({"status": "active"})
             total_clients = await self.db.users.count_documents({"user_type": "client", "client_status": "active"})
-            total_deals = await self.db.deals.count({})
-            total_agents = await self.db.agents.count({"status": "active"})
+            total_deals = await self.db.deals.count_documents({})
+            total_admins = await self.db.admins.count_documents({"role": "admin", "status": "active"})
             
             # Метрики за останній місяць
             last_month = datetime.utcnow() - timedelta(days=30)
@@ -77,8 +77,8 @@ class AnalyticsEndpoints:
                     "new_last_month": deals_last_month,
                     "total_value": total_deals_value
                 },
-                "agents": {
-                    "total": total_agents
+                "admins": {
+                    "total": total_admins
                 }
             }
             
@@ -141,14 +141,22 @@ class AnalyticsEndpoints:
                 {"$sort": {"_id": 1}}
             ])
             
-            # Звіт за агентами
-            agents_report = await self.db.deals.aggregate([
+            # Звіт за адмінами
+            admins_report = await self.db.deals.aggregate([
                 {"$match": {**date_filter, "status": "completed"}},
                 {"$group": {
-                    "_id": "$agent_id",
+                    "_id": "$admin_id",
                     "total_sales": {"$sum": "$price"},
                     "deals_count": {"$sum": 1}
                 }},
+                {"$lookup": {
+                    "from": "admins",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "admin"
+                }},
+                {"$unwind": {"path": "$admin", "preserveNullAndEmptyArrays": True}},
+                {"$match": {"admin.role": "admin"}},
                 {"$sort": {"total_sales": -1}}
             ])
             
@@ -172,7 +180,7 @@ class AnalyticsEndpoints:
             
             report = {
                 "sales_timeline": sales_data,
-                "agents_performance": agents_report,
+                "admins_performance": admins_report,
                 "property_types_performance": property_types_report,
                 "period": {
                     "start_date": start_date,
@@ -383,14 +391,14 @@ class AnalyticsEndpoints:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    async def get_agents_performance(
+    async def get_admins_performance(
         self,
         request: Request,
         start_date: Optional[str] = Query(None),
         end_date: Optional[str] = Query(None)
     ) -> Dict[str, Any]:
         """
-        Отримати аналітику продуктивності агентів (потребує авторизації).
+        Отримати аналітику продуктивності адмінів (потребує авторизації).
         """
         try:
             # Отримання користувача з токена
@@ -415,25 +423,26 @@ class AnalyticsEndpoints:
                 except ValueError:
                     return Response.error("Невірний формат дати", status_code=status.HTTP_400_BAD_REQUEST)
             
-            # Продуктивність агентів
-            agents_performance = await self.db.deals.aggregate([
+            # Продуктивність адмінів
+            admins_performance = await self.db.deals.aggregate([
                 {"$match": {**date_filter}},
                 {"$group": {
-                    "_id": "$agent_id",
+                    "_id": "$admin_id",
                     "total_deals": {"$sum": 1},
                     "completed_deals": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
                     "total_value": {"$sum": "$price"},
                     "avg_deal_value": {"$avg": "$price"}
                 }},
                 {"$lookup": {
-                    "from": "agents",
+                    "from": "admins",
                     "localField": "_id",
                     "foreignField": "_id",
-                    "as": "agent"
+                    "as": "admin"
                 }},
-                {"$unwind": {"path": "$agent", "preserveNullAndEmptyArrays": True}},
+                {"$unwind": {"path": "$admin", "preserveNullAndEmptyArrays": True}},
+                {"$match": {"admin.role": "admin"}},
                 {"$project": {
-                    "agent_name": {"$concat": ["$agent.first_name", " ", "$agent.last_name"]},
+                    "admin_name": {"$concat": ["$admin.first_name", " ", "$admin.last_name"]},
                     "total_deals": 1,
                     "completed_deals": 1,
                     "total_value": 1,
@@ -449,22 +458,23 @@ class AnalyticsEndpoints:
                 {"$sort": {"total_value": -1}}
             ])
             
-            # Топ агенти за кількістю угод
-            top_agents_by_deals = await self.db.deals.aggregate([
+            # Топ адміни за кількістю угод
+            top_admins_by_deals = await self.db.deals.aggregate([
                 {"$match": {**date_filter, "status": "completed"}},
                 {"$group": {
-                    "_id": "$agent_id",
+                    "_id": "$admin_id",
                     "deals_count": {"$sum": 1}
                 }},
                 {"$lookup": {
-                    "from": "agents",
+                    "from": "admins",
                     "localField": "_id",
                     "foreignField": "_id",
-                    "as": "agent"
+                    "as": "admin"
                 }},
-                {"$unwind": {"path": "$agent", "preserveNullAndEmptyArrays": True}},
+                {"$unwind": {"path": "$admin", "preserveNullAndEmptyArrays": True}},
+                {"$match": {"admin.role": "admin"}},
                 {"$project": {
-                    "agent_name": {"$concat": ["$agent.first_name", " ", "$agent.last_name"]},
+                    "admin_name": {"$concat": ["$admin.first_name", " ", "$admin.last_name"]},
                     "deals_count": 1
                 }},
                 {"$sort": {"deals_count": -1}},
@@ -472,8 +482,8 @@ class AnalyticsEndpoints:
             ])
             
             analytics = {
-                "agents_performance": agents_performance,
-                "top_agents_by_deals": top_agents_by_deals,
+                "admins_performance": admins_performance,
+                "top_admins_by_deals": top_admins_by_deals,
                 "period": {
                     "start_date": start_date,
                     "end_date": end_date
@@ -484,7 +494,7 @@ class AnalyticsEndpoints:
             
         except Exception as e:
             return Response.error(
-                message=f"Помилка при отриманні аналітики агентів: {str(e)}",
+                message=f"Помилка при отриманні аналітики адмінів: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -511,7 +521,7 @@ class AnalyticsEndpoints:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
             
             # Підтримувані типи звітів
-            supported_reports = ["sales", "properties", "marketing", "agents"]
+            supported_reports = ["sales", "properties", "marketing", "admins"]
             if report_type not in supported_reports:
                 return Response.error(
                     f"Непідтримуваний тип звіту. Доступні: {', '.join(supported_reports)}",

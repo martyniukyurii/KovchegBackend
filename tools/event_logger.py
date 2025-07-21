@@ -99,7 +99,7 @@ class EventLogger:
             title: str,
             description: str,
             client_id: Optional[str] = None,
-            agent_id: Optional[str] = None,
+            admin_id: Optional[str] = None,
             property_id: Optional[str] = None,
             duration: Optional[int] = None,
             result: Optional[str] = None,
@@ -109,8 +109,8 @@ class EventLogger:
     ) -> Optional[str]:
         """Логує дзвінок у журнал активності."""
         participants = {}
-        if agent_id:
-            participants["agents"] = [agent_id]
+        if admin_id:
+            participants["admins"] = [admin_id]
         if client_id:
             participants["clients"] = [client_id]
 
@@ -142,7 +142,7 @@ class EventLogger:
             description: str,
             location: str,
             client_id: Optional[str] = None,
-            agent_id: Optional[str] = None,
+            admin_id: Optional[str] = None,
             property_id: Optional[str] = None,
             duration: Optional[int] = None,
             result: Optional[str] = None,
@@ -152,8 +152,8 @@ class EventLogger:
     ) -> Optional[str]:
         """Логує зустріч у журнал активності."""
         participants = {}
-        if agent_id:
-            participants["agents"] = [agent_id]
+        if admin_id:
+            participants["admins"] = [admin_id]
         if client_id:
             participants["clients"] = [client_id]
 
@@ -190,15 +190,15 @@ class EventLogger:
             payment_status: str = "completed",
             payment_purpose: str = "",
             client_id: Optional[str] = None,
-            agent_id: Optional[str] = None,
+            admin_id: Optional[str] = None,
             property_id: Optional[str] = None,
             deal_id: Optional[str] = None,
             notes: Optional[str] = None
     ) -> Optional[str]:
         """Логує платіж у журнал активності."""
         participants = {}
-        if agent_id:
-            participants["agents"] = [agent_id]
+        if admin_id:
+            participants["admins"] = [admin_id]
         if client_id:
             participants["clients"] = [client_id]
 
@@ -238,14 +238,14 @@ class EventLogger:
             description: str,
             recipients: List[str],
             client_ids: Optional[List[str]] = None,
-            agent_id: Optional[str] = None,
+            admin_id: Optional[str] = None,
             result: Optional[str] = None,
             notes: Optional[str] = None
     ) -> Optional[str]:
         """Логує електронний лист у журнал активності."""
         participants = {}
-        if agent_id:
-            participants["agents"] = [agent_id]
+        if admin_id:
+            participants["admins"] = [admin_id]
         if client_ids:
             participants["clients"] = client_ids
 

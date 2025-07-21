@@ -1,8 +1,29 @@
 import asyncio
-import re
-import json
-import os
 import sys
+
+# Виправлення для macOS + Python 3.9
+if sys.platform == 'darwin' and sys.version_info[:2] == (3, 9):
+    class NoOpChildWatcher:
+        def add_child_handler(self, *args, **kwargs): pass
+        def remove_child_handler(self, *args, **kwargs): pass
+        def attach_loop(self, *args, **kwargs): pass
+        def close(self): pass
+        def is_active(self): return True
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    
+    # Патч child watcher
+    asyncio.events.get_child_watcher = lambda: NoOpChildWatcher()
+
+import json
+import random
+import os
+import re
+from datetime import datetime, timedelta
+from typing import Dict, Optional, List
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+from openai import OpenAI
+from dotenv import load_dotenv
 import aiohttp
 from typing import List, Dict, Optional
 from playwright.async_api import async_playwright, Page, Browser
@@ -20,27 +41,68 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from tools.logger import Logger
 from tools.database import SyncDatabase
+from tools.embedding_service import EmbeddingService
 
 class OLXParser:
     def __init__(self):
         self.browser = None
+        self.context = None
         self.page = None
+        self.openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        self.exchange_rates = {}
         self.logger = Logger()
         self.db = SyncDatabase()
+        self.embedding_service = EmbeddingService()  # Додаємо сервіс ембедингів
         
         # Імпортуємо TelegramBot динамічно
         from bot.telegram_bot import TelegramBot
         self.telegram_bot = TelegramBot()
         
-        # Ініціалізуємо OpenAI клієнт з ключем з env
-        openai.api_key = os.getenv('OPENAI_API_KEY')
-        
+    async def setup_browser(self):
+        """Налаштування браузера для парсингу"""
+        try:
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-web-security']
+            )
+            self.context = await self.browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            )
+            self.page = await self.context.new_page()
+            self.logger.info("✅ Браузер ініціалізовано")
+            return True
+        except Exception as e:
+            self.logger.warning(f"⚠️ Не вдалося ініціалізувати браузер: {e}")
+            self.logger.warning(f"🔄 Спроба з Firefox...")
+            
+            # Спробуємо Firefox як fallback
+            try:
+                self.playwright = await async_playwright().start()
+                self.browser = await self.playwright.firefox.launch(
+                    headless=True,
+                    args=['--no-sandbox']
+                )
+                self.context = await self.browser.new_context(
+                    viewport={'width': 1920, 'height': 1080}
+                )
+                self.page = await self.context.new_page()
+                self.logger.info("✅ Firefox браузер ініціалізовано")
+                return True
+            except Exception as e2:
+                self.logger.error(f"❌ Не вдалося ініціалізувати жоден браузер: {e2}")
+                self.browser = None
+                self.context = None
+                self.page = None
+                return False
+            
     async def init_browser(self):
         """Ініціалізація браузера"""
-        playwright = await async_playwright().start()
+        self.playwright = await async_playwright().start()
         
         # Використовуємо Firefox з додатковими налаштуваннями для серверного середовища
-        self.browser = await playwright.firefox.launch(
+        self.browser = await self.playwright.firefox.launch(
             headless=True,
             args=[
                 '--no-sandbox',
@@ -51,23 +113,47 @@ class OLXParser:
             ]
         )
         
-        context = await self.browser.new_context(
+        self.context = await self.browser.new_context(
             user_agent='Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/119.0',
             viewport={'width': 1920, 'height': 1080},
             ignore_https_errors=True
         )
         
-        self.page = await context.new_page()
+        self.page = await self.context.new_page()
         
         # Встановлюємо таймаути
         self.page.set_default_timeout(60000)
         self.page.set_default_navigation_timeout(60000)
         
     async def close_browser(self):
-        """Закриття браузера та Telegram бота"""
-        if self.browser:
-            await self.browser.close()
-        await self.telegram_bot.close()
+        """Закриття браузера"""
+        try:
+            if hasattr(self, 'page') and self.page:
+                try:
+                    await asyncio.wait_for(self.page.close(), timeout=5.0)
+                except:
+                    pass
+                self.page = None
+            if hasattr(self, 'context') and self.context:
+                try:
+                    await asyncio.wait_for(self.context.close(), timeout=5.0)
+                except:
+                    pass
+                self.context = None
+            if hasattr(self, 'browser') and self.browser:
+                try:
+                    await asyncio.wait_for(self.browser.close(), timeout=5.0)
+                except:
+                    pass
+                self.browser = None
+            if hasattr(self, 'playwright') and self.playwright:
+                try:
+                    await asyncio.wait_for(self.playwright.stop(), timeout=5.0)
+                except:
+                    pass
+                self.playwright = None
+        except Exception as e:
+            self.logger.warning(f"Помилка при закритті браузера: {e}")
             
     def check_listing_exists(self, url: str) -> bool:
         """Перевіряємо чи існує оголошення в базі"""
@@ -85,6 +171,17 @@ class OLXParser:
             listing_data['parsed_at'] = datetime.now().isoformat()
             listing_data['source'] = 'OLX'
             listing_data['is_active'] = True
+            
+            # Створюємо векторний ембединг
+            try:
+                embedding = await self.embedding_service.create_listing_embedding(listing_data)
+                if embedding:
+                    listing_data['vector_embedding'] = embedding
+                else:
+                    self.logger.warning(f"⚠️ Не вдалося створити ембединг для: {listing_data.get('title', 'Без назви')}")
+            except Exception as embedding_error:
+                self.logger.error(f"❌ Помилка створення ембедингу: {embedding_error}")
+                # Продовжуємо збереження навіть без ембедингу
             
             # Зберігаємо в базу
             result_id = self.db.parsed_listings.create(listing_data)
@@ -121,7 +218,7 @@ class OLXParser:
             self.logger.info(f"📡 Запит до: {url}")
             
             # Використовуємо requests замість aiohttp
-            response = requests.get(url, headers=headers, verify=False, timeout=10)
+            response = requests.get(url, headers=headers, timeout=10)
             self.logger.info(f"📊 Статус відповіді: {response.status_code}")
             
             if response.status_code == 200:
@@ -440,13 +537,10 @@ class OLXParser:
         """Використовуємо OpenAI для визначення локації з опису"""
         # Спочатку пробуємо OpenAI
         try:
-            if openai.api_key:
+            if self.openai_client:
                 text = f"Назва: {title or ''}\nОпис: {description or ''}"
                 
-                from openai import OpenAI
-                client = OpenAI(api_key=openai.api_key)
-                
-                response = client.chat.completions.create(
+                response = self.openai_client.chat.completions.create(
                     model="gpt-3.5-turbo",
                     messages=[
                         {"role": "system", "content": "Ти допомагаєш визначити точну адресу з опису нерухомості в Чернівцях. Шукай назви вулиць (з номером будинку чи без), проспектів, районів міста (наприклад: Центр, Гравітон, Проспект тощо). Відповідай ТІЛЬКИ адресою без додаткового тексту. Якщо адресу не знайдено, відповідай 'Не знайдено'."},
@@ -475,6 +569,11 @@ class OLXParser:
     async def extract_listing_data(self, url: str) -> Optional[Dict]:
         """Витягуємо дані з одного оголошення"""
         try:
+            # Перевіряємо чи браузер доступний
+            if not self.page or not self.browser:
+                self.logger.warning("Браузер недоступний, спробуємо ініціалізувати...")
+                await self.init_browser()
+                
             await self.page.goto(url, wait_until='domcontentloaded')
             await self.wait_for_page_load()
             
@@ -686,20 +785,7 @@ class OLXParser:
             processed = 0
             skipped = 0
             
-            # Перезапускаємо браузер кожні 10 оголошень для очистки пам'яті
-            browser_restart_interval = 10
-            
             for idx, url in enumerate(listing_urls[:20]):  # Збільшуємо до 20 оголошень
-                # Перезапускаємо браузер періодично для очистки пам'яті
-                if idx > 0 and idx % browser_restart_interval == 0:
-                    self.logger.info(f"🔄 Профілактичний перезапуск браузера після {idx} оголошень...")
-                    try:
-                        await self.close_browser()
-                        await asyncio.sleep(3)
-                        await self.init_browser()
-                        self.logger.info("✅ Браузер перезапущено для очистки пам'яті")
-                    except Exception as e:
-                        self.logger.error(f"❌ Помилка профілактичного перезапуску: {e}")
                 
                 # Перевіряємо чи існує вже в базі СПОЧАТКУ
                 if self.check_listing_exists(url):
@@ -728,22 +814,7 @@ class OLXParser:
                         error_msg = str(e)
                         self.logger.error(f"❌ Помилка парсингу {url} (спроба {attempt + 1}/{max_retries}): {error_msg}")
                         
-                        # Перевіряємо чи це помилка пам'яті або браузера
-                        memory_errors = ["collected to prevent unbounded heap growth", "object has been collected"]
-                        browser_errors = ["playwright", "connection", "_object"]
-                        
-                        is_memory_error = any(err in error_msg.lower() for err in memory_errors)
-                        is_browser_error = any(err in error_msg.lower() for err in browser_errors)
-                        
-                        if is_memory_error or is_browser_error:
-                            self.logger.warning("🔄 Перезапускаємо браузер через помилку пам'яті/браузера...")
-                            try:
-                                await self.close_browser()
-                                await asyncio.sleep(3)
-                                await self.init_browser()
-                                self.logger.info("✅ Браузер перезапущено")
-                            except Exception as browser_error:
-                                self.logger.error(f"❌ Помилка перезапуску браузера: {browser_error}")
+                        # Просто логуємо помилку без перезапуску браузера
                         
                         if attempt == max_retries - 1:
                             self.logger.error(f"💥 Не вдалося спарсити {url} після {max_retries} спроб")
@@ -763,6 +834,12 @@ class OLXParser:
     async def parse_all_olx_urls(self, urls_data: List[Dict]) -> List[Dict]:
         """Парсимо всі OLX URL з файлу посилань"""
         all_results = []
+        
+        # Спочатку спробуємо ініціалізувати браузер
+        browser_ready = await self.setup_browser()
+        if not browser_ready:
+            self.logger.warning("⚠️ Браузер недоступний, пропускаємо OLX парсинг")
+            return all_results
         
         # Фільтруємо тільки OLX посилання
         olx_urls = [item for item in urls_data if item.get('site') == 'OLX']
@@ -788,4 +865,6 @@ class OLXParser:
                 self.logger.error(f"Помилка при парсингу категорії {property_type}: {e}")
                 continue
                 
+        # Закриваємо браузер після завершення
+        await self.close_browser()
         return all_results

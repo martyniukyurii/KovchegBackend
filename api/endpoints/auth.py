@@ -1,11 +1,12 @@
 from fastapi import Depends, HTTPException, status, Request
+from fastapi.responses import HTMLResponse
 from typing import Dict, Any, Optional
 from api.response import Response
 from api.exceptions.auth_exceptions import AuthException, AuthErrorCode
 from tools.database import Database
 from tools.event_logger import EventLogger
 from tools.email_service import EmailService
-from tools.oauth2_service import OAuth2Service
+# OAuth2Service видалено - не використовується для Google Drive
 from datetime import datetime, timedelta
 import bcrypt
 import secrets
@@ -19,19 +20,31 @@ class AuthEndpoints:
         self.db = Database()
         self.jwt_handler = JWTHandler()
         self.email_service = EmailService()
-        self.oauth2_service = OAuth2Service()
 
     async def register(self, request: Request) -> Dict[str, Any]:
         """
         Реєстрація нового користувача.
         
-        Параметри:
-        - email: обов'язковий
-        - password: обов'язковий
-        - first_name: обов'язковий
-        - last_name: обов'язковий
-        - phone: опціональний
-        - language: опціональний (uk, ru, en), за замовчуванням uk
+        Тіло запиту (JSON):
+        {
+            "email": "user@example.com",        // обов'язково, унікальний
+            "password": "securepass123",        // обов'язково, мін. 6 символів
+            "first_name": "Іван",               // обов'язково
+            "last_name": "Петренко",            // обов'язково
+            "phone": "+380501234567",           // опціонально
+            "language": "uk"                    // опціонально (uk, ru, en), за замовчуванням uk
+        }
+        
+        Приклад відповіді:
+        {
+            "status": "success",
+            "data": {
+                "message": "Користувач успішно зареєстрований. Перевірте email для верифікації."
+            },
+            "status_code": 201
+        }
+        
+        Після реєстрації на email приходить код верифікації.
         """
         try:
             data = await request.json()
@@ -69,7 +82,7 @@ class AuthEndpoints:
                 "updated_at": datetime.utcnow(),
                 "language_code": language,
                 "is_verified": False,
-                "user_type": "client",  # client, agent, admin
+                "user_type": "client",  # client, admin, admin
                 "favorites": [],
                 "search_history": [],
                 "notifications_settings": {
@@ -78,7 +91,7 @@ class AuthEndpoints:
                 },
                 # Клієнтські поля
                 "client_status": "active",  # active, inactive, lead
-                "assigned_agent_id": None,
+                "assigned_admin_id": None,
                 "client_interests": [],
                 "client_budget": {},
                 "client_preferred_locations": [],
@@ -140,6 +153,21 @@ class AuthEndpoints:
     async def verify_email(self, request: Request) -> Dict[str, Any]:
         """
         Верифікація email користувача.
+        
+        Тіло запиту (JSON):
+        {
+            "code": "123456"        // 6-значний код з email
+        }
+        
+        Приклад відповіді:
+        {
+            "status": "success",
+            "data": {
+                "message": "Email успішно верифіковано"
+            }
+        }
+        
+        Після верифікації користувач може авторизуватись.
         """
         try:
             data = await request.json()
@@ -198,6 +226,32 @@ class AuthEndpoints:
     async def login(self, request: Request) -> Dict[str, Any]:
         """
         Вхід користувача в систему.
+        
+        Тіло запиту (JSON):
+        {
+            "email": "user@example.com",        // обов'язково
+            "password": "userpassword"          // обов'язково
+        }
+        
+        Приклад відповіді:
+        {
+            "status": "success",
+            "data": {
+                "user": {
+                    "id": "687619cebc3697db0a23b3b3",
+                    "email": "user@example.com",
+                    "first_name": "Іван",
+                    "last_name": "Петренко",
+                    "phone": "+380501234567",
+                    "is_verified": true
+                },
+                "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "token_type": "bearer"
+            }
+        }
+        
+        Використовуйте access_token в заголовку Authorization: Bearer <token>
         """
         try:
             data = await request.json()
@@ -301,16 +355,14 @@ class AuthEndpoints:
             
             # Якщо передано код, спочатку обміняємо його на токен
             if code and provider == "google":
-                token = await self.oauth2_service.exchange_google_code_for_token(code, redirect_uri)
-                if not token:
-                    return Response.error("Невірний код авторизації", status_code=status.HTTP_401_UNAUTHORIZED)
+                return Response.error("Google OAuth не налаштований", status_code=status.HTTP_501_NOT_IMPLEMENTED)
             
             # Верифікація токена через відповідний сервіс
             oauth_user_info = None
             if provider == "google":
-                oauth_user_info = await self.oauth2_service.verify_google_token(token)
+                return Response.error("Google OAuth не налаштований", status_code=status.HTTP_501_NOT_IMPLEMENTED)
             elif provider == "apple":
-                oauth_user_info = await self.oauth2_service.verify_apple_token(token)
+                return Response.error("Apple OAuth не налаштований", status_code=status.HTTP_501_NOT_IMPLEMENTED)
             
             if not oauth_user_info:
                 return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
@@ -346,7 +398,7 @@ class AuthEndpoints:
                     },
                     # Клієнтські поля
                     "client_status": "active",
-                    "assigned_agent_id": None,
+                    "assigned_admin_id": None,
                     "client_interests": [],
                     "client_budget": {},
                     "client_preferred_locations": [],
@@ -585,7 +637,34 @@ class AuthEndpoints:
                 message=f"Помилка при виході з системи: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
+
+    async def refresh_token(self, request: Request) -> Dict[str, Any]:
+        """Оновлення JWT токена"""
+        try:
+            refresh_token = request.headers.get("Refresh-Token")
+            if not refresh_token:
+                return Response.error("Refresh token обов'язковий", status_code=status.HTTP_400_BAD_REQUEST)
+
+            payload = self.jwt_handler.decode_token(refresh_token)
+            if payload.get("token_type") != "refresh":
+                return Response.error("Неправильний тип токена", status_code=status.HTTP_401_UNAUTHORIZED)
+
+            user_id = payload.get("sub")
+            user = await self.db.users.find_one({"_id": ObjectId(user_id)})
+            if not user:
+                return Response.error("Користувач не знайдений", status_code=status.HTTP_404_NOT_FOUND)
+
+            # Генеруємо новий access token
+            access_token = self.jwt_handler.create_access_token(user_id)
+
+            return Response.success({
+                "access_token": access_token,
+                "token_type": "bearer"
+            })
+
+        except Exception as e:
+            return Response.error(f"Помилка оновлення токена: {str(e)}", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     async def get_oauth2_urls(self, request: Request) -> Dict[str, Any]:
         """
         Отримання URL для OAuth2 авторизації.
@@ -600,14 +679,7 @@ class AuthEndpoints:
             
             urls = {}
             
-            # Google OAuth2 URL
-            if self.oauth2_service.google_client_id:
-                urls["google"] = self.oauth2_service.get_google_auth_url(redirect_uri, state)
-            
-            # Apple OAuth2 URL
-            if self.oauth2_service.apple_client_id:
-                urls["apple"] = self.oauth2_service.get_apple_auth_url(redirect_uri, state)
-            
+            # Google та Apple OAuth не налаштований
             return Response.success({
                 "oauth2_urls": urls,
                 "redirect_uri": redirect_uri,
@@ -619,3 +691,147 @@ class AuthEndpoints:
                 message=f"Помилка при отриманні OAuth2 URLs: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             ) 
+
+    async def get_google_drive_auth_url(self) -> Dict[str, Any]:
+        """Отримати URL для OAuth авторизації Google Drive"""
+        try:
+            from google_auth_oauthlib.flow import Flow
+            import os
+            
+            # Шлях до credentials файлу
+            credentials_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tools', 'google api kovcheg test.json')
+            
+            if not os.path.exists(credentials_path):
+                return Response.error("OAuth credentials файл не знайдено", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            # Створюємо OAuth flow
+            flow = Flow.from_client_secrets_file(
+                credentials_path,
+                scopes=['https://www.googleapis.com/auth/drive'],
+                redirect_uri='http://localhost:8002/auth/google-drive/callback-web'
+            )
+            
+            # Отримуємо authorization URL
+            auth_url, state = flow.authorization_url(prompt='consent', access_type='offline')
+            
+            # Зберігаємо state для перевірки
+            # В production використовуйте Redis або базу даних
+            self._oauth_state = state
+            
+            return Response.success({
+                "auth_url": auth_url,
+                "state": state
+            })
+            
+        except Exception as e:
+            return Response.error(f"Помилка створення OAuth URL: {str(e)}", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    async def handle_google_drive_callback(self, request: Request) -> Dict[str, Any]:
+        """Обробка callback від Google OAuth"""
+        try:
+            from google_auth_oauthlib.flow import Flow
+            import os
+            
+            data = await request.json()
+            auth_code = data.get('code')
+            
+            if not auth_code:
+                return Response.error("Код авторизації не надано", status_code=status.HTTP_400_BAD_REQUEST)
+            
+            # Шлях до credentials файлу
+            credentials_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tools', 'google api kovcheg test.json')
+            token_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tools', 'token.json')
+            
+            # Створюємо OAuth flow
+            flow = Flow.from_client_secrets_file(
+                credentials_path,
+                scopes=['https://www.googleapis.com/auth/drive'],
+                redirect_uri='http://localhost:8002/auth/google-drive/callback-web'
+            )
+            
+            # Обмінюємо код на токени
+            flow.fetch_token(code=auth_code)
+            creds = flow.credentials
+            
+            # Зберігаємо токени
+            with open(token_path, 'w') as token_file:
+                token_file.write(creds.to_json())
+            
+            return Response.success({
+                "message": "Google Drive успішно підключено!",
+                "token_saved": True
+            })
+            
+        except Exception as e:
+            return Response.error(f"Помилка OAuth callback: {str(e)}", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    async def handle_google_drive_callback_web(self, request: Request) -> Dict[str, Any]:
+        """Обробка GET callback від Google OAuth (для веб-авторизації)"""
+        try:
+            from google_auth_oauthlib.flow import Flow
+            from fastapi.responses import HTMLResponse
+            import os
+            
+            # Отримуємо параметри з URL
+            code = request.query_params.get('code')
+            state = request.query_params.get('state')
+            error = request.query_params.get('error')
+            
+            if error:
+                return HTMLResponse(f"""
+                <html><body>
+                <h1>❌ Помилка авторизації</h1>
+                <p>Помилка: {error}</p>
+                <p><a href="/static/oauth_setup.html">Спробувати знову</a></p>
+                </body></html>
+                """)
+            
+            if not code:
+                return HTMLResponse("""
+                <html><body>
+                <h1>❌ Не отримано код авторизації</h1>
+                <p><a href="/static/oauth_setup.html">Спробувати знову</a></p>
+                </body></html>
+                """)
+            
+            # Шлях до credentials файлу
+            credentials_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tools', 'google api kovcheg test.json')
+            token_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tools', 'token.json')
+            
+            # Створюємо OAuth flow
+            flow = Flow.from_client_secrets_file(
+                credentials_path,
+                scopes=['https://www.googleapis.com/auth/drive'],
+                redirect_uri='http://localhost:8002/auth/google-drive/callback-web'
+            )
+            
+            # Обмінюємо код на токени
+            flow.fetch_token(code=code)
+            creds = flow.credentials
+            
+            # Зберігаємо токени
+            with open(token_path, 'w') as token_file:
+                token_file.write(creds.to_json())
+            
+            return HTMLResponse("""
+            <html><body style='font-family: Arial; margin: 50px; text-align: center;'>
+            <h1>🎉 Google Drive успішно підключено!</h1>
+            <p>Тепер ви можете завантажувати документи на ваш особистий Google Drive.</p>
+            <p><a href="/static/oauth_setup.html" style='color: #007bff;'>Повернутися до налаштувань</a></p>
+            <script>
+                // Автоматично закриваємо вікно через 3 секунди
+                setTimeout(() => {
+                    window.close();
+                }, 3000);
+            </script>
+            </body></html>
+            """)
+            
+        except Exception as e:
+            return HTMLResponse(f"""
+            <html><body style='font-family: Arial; margin: 50px; text-align: center;'>
+            <h1>❌ Помилка OAuth callback</h1>
+            <p>Деталі: {str(e)}</p>
+            <p><a href="/static/oauth_setup.html">Спробувати знову</a></p>
+            </body></html>
+            """) 

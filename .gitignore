@@ -49,4 +49,8 @@ playwright-browsers/
 
 # Temporary files
 tmp/
-temp/ 
+temp/
+
+# Google OAuth files (use .env instead)
+tools/google*.json
+tools/token.json 

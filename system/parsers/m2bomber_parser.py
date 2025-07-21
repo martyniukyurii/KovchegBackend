@@ -1,23 +1,40 @@
 import asyncio
-import re
+import sys
+
+# Виправлення для macOS + Python 3.9
+if sys.platform == 'darwin' and sys.version_info[:2] == (3, 9):
+    class NoOpChildWatcher:
+        def add_child_handler(self, *args, **kwargs): pass
+        def remove_child_handler(self, *args, **kwargs): pass
+        def attach_loop(self, *args, **kwargs): pass
+        def close(self): pass
+        def is_active(self): return True
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    
+    # Патч child watcher
+    asyncio.events.get_child_watcher = lambda: NoOpChildWatcher()
+
 import json
+import random
+import os
+import re
 import requests
 from datetime import datetime
-from playwright.async_api import async_playwright
+from typing import Dict, Optional, List
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from openai import OpenAI
-import os
-import sys
 from pathlib import Path
 from dotenv import load_dotenv
-from typing import Dict, Optional
+from tools.logger import Logger
+from tools.database import SyncDatabase
+from tools.embedding_service import EmbeddingService
 
 # Завантажуємо змінні середовища
 load_dotenv()
 
 # Додаємо кореневу директорію до Python path
 sys.path.append(str(Path(__file__).parent.parent.parent))
-from tools.logger import Logger
-from tools.database import SyncDatabase
 
 class M2BomberParser:
     def __init__(self):
@@ -27,6 +44,7 @@ class M2BomberParser:
         self.exchange_rates = {}
         self.logger = Logger()
         self.db = SyncDatabase()
+        self.embedding_service = EmbeddingService()  # Додаємо сервіс ембедингів
         
         # Імпортуємо TelegramBot динамічно
         from bot.telegram_bot import TelegramBot
@@ -36,12 +54,57 @@ class M2BomberParser:
         self.results_dir = Path(__file__).parent.parent.parent / "parsed_results" / "individual"
         self.results_dir.mkdir(parents=True, exist_ok=True)
         
+    async def setup_browser(self):
+        """Налаштування браузера для парсингу"""
+        try:
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.firefox.launch(
+                headless=True,
+                args=[
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor'
+                ]
+            )
+            self.context = await self.browser.new_context(
+                user_agent='Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/119.0',
+                viewport={'width': 1920, 'height': 1080},
+                ignore_https_errors=True
+            )
+            self.logger.info("✅ M2Bomber Firefox браузер ініціалізовано")
+            return True
+        except Exception as e:
+            self.logger.warning(f"⚠️ Не вдалося ініціалізувати Firefox: {e}")
+            self.logger.warning(f"🔄 Спроба з Chromium...")
+            
+            # Спробуємо Chromium як fallback
+            try:
+                self.playwright = await async_playwright().start()
+                self.browser = await self.playwright.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-web-security']
+                )
+                self.context = await self.browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    viewport={'width': 1920, 'height': 1080},
+                    ignore_https_errors=True
+                )
+                self.logger.info("✅ M2Bomber Chromium браузер ініціалізовано")
+                return True
+            except Exception as e2:
+                self.logger.error(f"❌ Не вдалося ініціалізувати жоден браузер для M2Bomber: {e2}")
+                self.browser = None
+                self.context = None
+                return False
+            
     async def init_browser(self):
         """Ініціалізація браузера Playwright"""
-        playwright = await async_playwright().start()
+        self.playwright = await async_playwright().start()
         
         # Використовуємо Firefox з додатковими налаштуваннями для серверного середовища
-        self.browser = await playwright.firefox.launch(
+        self.browser = await self.playwright.firefox.launch(
             headless=True,
             args=[
                 '--no-sandbox',
@@ -59,10 +122,28 @@ class M2BomberParser:
         )
         
     async def close_browser(self):
-        """Закриття браузера та Telegram бота"""
-        if self.browser:
-            await self.browser.close()
-        await self.telegram_bot.close()
+        """Закриття браузера"""
+        try:
+            if hasattr(self, 'context') and self.context:
+                try:
+                    await asyncio.wait_for(self.context.close(), timeout=5.0)
+                except:
+                    pass
+                self.context = None
+            if hasattr(self, 'browser') and self.browser:
+                try:
+                    await asyncio.wait_for(self.browser.close(), timeout=5.0)
+                except:
+                    pass
+                self.browser = None
+            if hasattr(self, 'playwright') and self.playwright:
+                try:
+                    await asyncio.wait_for(self.playwright.stop(), timeout=5.0)
+                except:
+                    pass
+                self.playwright = None
+        except Exception as e:
+            self.logger.warning(f"Помилка при закритті браузера: {e}")
             
     async def get_exchange_rates(self):
         """Отримання курсів валют з НБУ"""
@@ -138,6 +219,17 @@ class M2BomberParser:
             listing_data['parsed_at'] = datetime.now().isoformat()
             listing_data['source'] = 'M2BOMBER'
             listing_data['is_active'] = True
+            
+            # Створюємо векторний ембединг
+            try:
+                embedding = await self.embedding_service.create_listing_embedding(listing_data)
+                if embedding:
+                    listing_data['vector_embedding'] = embedding
+                else:
+                    self.logger.warning(f"⚠️ Не вдалося створити ембединг для: {listing_data.get('title', 'Без назви')}")
+            except Exception as embedding_error:
+                self.logger.error(f"❌ Помилка створення ембедингу: {embedding_error}")
+                # Продовжуємо збереження навіть без ембедингу
             
             # Зберігаємо в базу
             result_id = self.db.parsed_listings.create(listing_data)
@@ -473,20 +565,7 @@ class M2BomberParser:
             
             parsed_listings = []
             
-            # Перезапускаємо браузер кожні 10 оголошень для очистки пам'яті
-            browser_restart_interval = 10
-            
             for i, listing_url in enumerate(listing_urls[:20], 1):
-                # Перезапускаємо браузер періодично для очистки пам'яті
-                if i > 1 and (i - 1) % browser_restart_interval == 0:
-                    self.logger.info(f"🔄 Профілактичний перезапуск браузера після {i-1} оголошень...")
-                    try:
-                        await self.close_browser()
-                        await asyncio.sleep(3)
-                        await self.init_browser()
-                        self.logger.info("✅ Браузер перезапущено для очистки пам'яті")
-                    except Exception as e:
-                        self.logger.error(f"❌ Помилка профілактичного перезапуску: {e}")
                 
                 # Перевіряємо чи оголошення вже існує в базі СПОЧАТКУ
                 if self.check_listing_exists(listing_url):
@@ -529,22 +608,7 @@ class M2BomberParser:
                                 pass
                             listing_page = None
                         
-                        # Перевіряємо чи це помилка пам'яті або браузера
-                        memory_errors = ["collected to prevent unbounded heap growth", "object has been collected"]
-                        browser_errors = ["playwright", "connection", "_object"]
-                        
-                        is_memory_error = any(err in error_msg.lower() for err in memory_errors)
-                        is_browser_error = any(err in error_msg.lower() for err in browser_errors)
-                        
-                        if is_memory_error or is_browser_error:
-                            self.logger.warning("🔄 Перезапускаємо браузер через помилку пам'яті/браузера...")
-                            try:
-                                await self.close_browser()
-                                await asyncio.sleep(3)
-                                await self.init_browser()
-                                self.logger.info("✅ Браузер перезапущено")
-                            except Exception as browser_error:
-                                self.logger.error(f"❌ Помилка перезапуску браузера: {browser_error}")
+                        # Просто логуємо помилку без перезапуску браузера
                         
                         if attempt == max_retries - 1:
                             self.logger.error(f"💥 Не вдалося спарсити {listing_url} після {max_retries} спроб")
@@ -564,7 +628,12 @@ class M2BomberParser:
         """Парсинг всіх M2Bomber URL"""
         try:
             await self.get_exchange_rates()
-            await self.init_browser()
+            
+            # Спробуємо ініціалізувати браузер
+            browser_ready = await self.setup_browser()
+            if not browser_ready:
+                self.logger.warning("⚠️ Браузер недоступний, пропускаємо M2Bomber парсинг")
+                return []
             
             all_parsed_data = []
             

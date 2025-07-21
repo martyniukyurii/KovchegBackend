@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Login Widget Test - Kovcheg</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .login-section {
+            text-align: center;
+            margin: 30px 0;
+            padding: 20px;
+            border: 2px dashed #007bff;
+            border-radius: 10px;
+        }
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+        }
+        .success {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+        pre {
+            background: #f1f1f1;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+        .info {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .url-info {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .url-info code {
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            background: #dc3545;
+            color: white;
+            margin: 10px 0;
+        }
+        button:hover {
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Тестування Telegram Login Widget - Kovcheg CRM</h1>
+        
+        <div class="url-info">
+            <strong>🌐 Поточний ngrok URL:</strong> <code>https://0df299dbb1d3.ngrok-free.app</code><br>
+            <strong>📡 API endpoint:</strong> <code>https://0df299dbb1d3.ngrok-free.app/telegram/webapp/authenticate</code>
+        </div>
+
+        <div class="info">
+            <strong>📋 Інструкція для налаштування BotFather:</strong>
+            <ol>
+                <li>Відкрийте Telegram → @BotFather</li>
+                <li>Відправте команду: <code>/setdomain</code></li>
+                <li>Виберіть бота: <code>novobudchatbot</code></li>
+                <li>Введіть домен: <code>0df299dbb1d3.ngrok-free.app</code></li>
+                <li>Оновіть цю сторінку після налаштування</li>
+            </ol>
+        </div>
+
+        <div class="login-section">
+            <h3>🔑 Авторизація через Telegram</h3>
+            <p>Після налаштування домену в BotFather тут з'явиться кнопка входу</p>
+            <div id="telegram-login-container"></div>
+        </div>
+
+        <button onclick="clearResults()">Очистити результати</button>
+
+        <div id="result" class="result" style="display: none;">
+            <h3>Результат:</h3>
+            <div id="result-content"></div>
+        </div>
+    </div>
+
+    <script>
+        // Глобальна функція для обробки Telegram callback
+        window.TelegramLoginCallback = function(user) {
+            console.log('Telegram user data:', user);
+            
+            showResult('✅ Отримано дані від Telegram:', user, 'success');
+            
+            // Відправляємо дані на наш API
+            authenticateWithTelegram(user);
+        };
+
+        // Функція для створення Telegram Login Widget
+        function createTelegramLoginWidget() {
+            const container = document.getElementById('telegram-login-container');
+            
+            // Очищаємо контейнер
+            container.innerHTML = '';
+            
+            // Створюємо скрипт для Telegram Widget
+            const script = document.createElement('script');
+            script.async = true;
+            script.src = 'https://telegram.org/js/telegram-widget.js?21';
+            script.setAttribute('data-telegram-login', 'novobudchatbot');
+            script.setAttribute('data-size', 'large');
+            script.setAttribute('data-onauth', 'TelegramLoginCallback(user)');
+            script.setAttribute('data-request-access', 'write');
+            script.setAttribute('data-lang', 'uk');
+            
+            container.appendChild(script);
+        }
+
+        // Функція для аутентифікації через наш API
+        async function authenticateWithTelegram(user) {
+            try {
+                showResult('📤 Відправляю запит на API...', null, 'info');
+                
+                // Відправляємо дані від Telegram Login Widget
+                const response = await fetch('/telegram/widget/authenticate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id: user.id,
+                        first_name: user.first_name,
+                        last_name: user.last_name,
+                        username: user.username,
+                        photo_url: user.photo_url,
+                        auth_date: user.auth_date,
+                        hash: user.hash
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult('✅ Успішна аутентифікація!', data, 'success');
+                } else {
+                    showResult('❌ Помилка аутентифікації:', data, 'error');
+                }
+            } catch (error) {
+                showResult('❌ Помилка з\'єднання:', { error: error.message }, 'error');
+            }
+        }
+
+        // Функція для відображення результатів
+        function showResult(title, data, type) {
+            const resultDiv = document.getElementById('result');
+            const contentDiv = document.getElementById('result-content');
+            
+            resultDiv.style.display = 'block';
+            resultDiv.className = `result ${type}`;
+            
+            let content = `<h4>${title}</h4>`;
+            
+            if (data) {
+                content += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            }
+            
+            contentDiv.innerHTML = content;
+            
+            // Прокручуємо до результату
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Функція для очищення результатів
+        function clearResults() {
+            document.getElementById('result').style.display = 'none';
+        }
+
+        // Ініціалізація при завантаженні сторінки
+        document.addEventListener('DOMContentLoaded', function() {
+            createTelegramLoginWidget();
+        });
+    </script>
+</body>
+</html> 
