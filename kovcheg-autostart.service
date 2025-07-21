@@ -1,0 +1,19 @@
+[Unit]
+Description=Kovcheg Backend Auto-start
+After=docker.service
+Requires=docker.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=forking
+User=ubuntu
+WorkingDirectory=/home/ubuntu/KovchegBackend
+ExecStart=/home/ubuntu/KovchegBackend/start_production.sh
+ExecStop=/usr/bin/docker-compose -f /home/ubuntu/KovchegBackend/docker-compose.yml down
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target 

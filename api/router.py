@@ -24,7 +24,9 @@ class Router:
 
     async def initialize(self):
         """Ініціалізує всі ендпоінти"""
+        print("🔧 Початок ініціалізації роутера...")
         # Ініціалізація обробників
+        print("📝 Ініціалізація AuthEndpoints...")
         self.auth_handler = AuthEndpoints()
         self.admin_auth_handler = AdminAuthEndpoints()
         self.tg_auth_handler = TelegramAuthEndpoints()
@@ -232,9 +234,7 @@ class Router:
         self.ai_assistant_router.post("/admin/bulk-generate-tasks", summary="Масове генерування задач для всіх адмінів")(self.ai_assistant_handler.bulk_generate_daily_tasks)
         self.ai_assistant_router.delete("/admin/cleanup-expired-tasks", summary="Видалення застарілих задач (3+ місяці)")(self.ai_assistant_handler.cleanup_expired_tasks)
         
-        # Фонові задачі (тільки для тестування)
-        self.ai_assistant_router.post("/admin/test-generate-tasks", summary="Тестова генерація задач")(self.test_generate_tasks)
-        self.ai_assistant_router.post("/admin/test-cleanup-tasks", summary="Тестове очищення задач")(self.test_cleanup_tasks)
+        # Тестові endpoints видалені
 
         # Додаємо роутери в FastAPI додасть /kovcheg/)
         self.app.include_router(self.auth_router)
@@ -253,17 +253,7 @@ class Router:
         self.app.include_router(self.smart_search_router)
         self.app.include_router(self.ai_assistant_router)
         
-    async def test_generate_tasks(self, request: Request):
-        """Тестова генерація задач."""
-        from api.background_tasks import background_manager
-        result = await background_manager.manual_generate_tasks()
-        return JSONResponse(content=result)
-        
-    async def test_cleanup_tasks(self, request: Request):
-        """Тестове очищення задач."""
-        from api.background_tasks import background_manager
-        result = await background_manager.manual_cleanup_tasks()
-        return JSONResponse(content=result)
+    # Тестові функції видалені
         
     async def handle_options_login(self):
         """Обробник OPTIONS запитів для /auth/login"""

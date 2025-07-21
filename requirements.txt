@@ -47,6 +47,7 @@ python-dateutil==2.8.2
 
 # Logging
 structlog==23.2.0
+colorlog==6.8.2
 
 # Task Scheduling
 schedule==1.2.0 
@@ -59,3 +60,6 @@ lxml==4.9.3
 # Document processing
 python-docx==0.8.11
 docxtpl==0.16.7
+
+# System monitoring
+psutil==5.9.5

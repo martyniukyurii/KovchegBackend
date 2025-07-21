@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  kovcheg-api:
+    build: .
+    container_name: kovcheg-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./monitoring_logs:/app/monitoring_logs
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # Парсинг сервіс
+  kovcheg-parser:
+    build: .
+    container_name: kovcheg-parser
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./monitoring_logs:/app/monitoring_logs
+    restart: unless-stopped
+    command: ["python", "system/main.py"]
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.25'
+    depends_on:
+      - kovcheg-api
+
+  # Monitoring сервіс
+  watchtower:
+    image: containrrr/watchtower
+    container_name: kovcheg-watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600  # Перевірка кожну годину
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+networks:
+  default:
+    name: kovcheg-network 

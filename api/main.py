@@ -55,15 +55,32 @@ class CustomCorsMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     """Управління життєвим циклом додатка"""
     # Startup
+    print("⭐ LIFESPAN STARTUP ПОЧАВСЯ!")
     logger.info("🚀 Запуск API сервера...")
     
     # Ініціалізація бази даних
     db = Database()
     await db.setup_indexes()
     
+    # Ініціалізація роутера
+    try:
+        logger.info("🔧 Початок ініціалізації роутера...")
+        router = Router(app)
+        await router.initialize()
+        logger.info("✅ Роутер успішно ініціалізовано")
+    except Exception as e:
+        logger.error(f"❌ Помилка ініціалізації роутера: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+    
     # Запуск фонових задач
     from api.background_tasks import background_manager
     await background_manager.start()
+    
+    # Запускаємо Telegram бота в фоновому режимі
+    from bot.telegram_bot import TelegramBot
+    telegram_bot = TelegramBot()
+    asyncio.create_task(telegram_bot.start_admin_bot())
     
     try:
         yield
@@ -82,6 +99,8 @@ app = FastAPI(
     openapi_url="/openapi.json",
     lifespan=lifespan
 )
+
+# Роути будуть додані в lifespan
 
 # Додаємо статичні файли
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -103,15 +122,17 @@ app.add_middleware(
     max_age=600,
 )
 
-@app.on_event("startup")
-async def startup_event():
-    """Виконується при старті застосунку"""
-    router = Router(app)
-    await router.initialize()
-    
-    # Запускаємо Telegram бота в фоновому режимі
-    telegram_bot = TelegramBot()
-    asyncio.create_task(telegram_bot.start_admin_bot())
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint для моніторингу"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0"
+    }
+
+# Startup event тепер в lifespan функції
 
 if __name__ == "__main__":
     print("🚀 Запуск Kovcheg API сервера...")

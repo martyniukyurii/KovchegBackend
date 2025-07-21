@@ -7,6 +7,13 @@ from datetime import datetime, time
 from pathlib import Path
 from typing import List, Dict
 
+# Фікс для Docker контейнерів та asyncio
+try:
+    import uvloop
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+except ImportError:
+    pass
+
 # Виправлення для Python 3.9 на macOS
 if sys.platform == 'darwin' and sys.version_info[:2] == (3, 9):
     import asyncio

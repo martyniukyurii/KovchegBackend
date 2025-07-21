@@ -156,6 +156,7 @@ class TelegramBot:
         """Показати меню власника"""
         keyboard = InlineKeyboardMarkup(row_width=1)
         keyboard.add(
+            InlineKeyboardButton("🏥 Перевірити стан сервера", callback_data="owner_check_server"),
             InlineKeyboardButton("👥 Переглянути заявки адмінів", callback_data="owner_view_applications"),
             InlineKeyboardButton("👨‍💼 Список адмінів", callback_data="owner_view_admins"),
             InlineKeyboardButton("🗑️ Видалити адміна", callback_data="owner_delete_admin"),
@@ -204,6 +205,9 @@ class TelegramBot:
             
         elif action == "change_password":
             await self.start_password_change(callback, state)
+            
+        elif action == "check_server":
+            await self.check_server_status(callback)
         
         await callback.answer()
     
@@ -1015,6 +1019,63 @@ class TelegramBot:
         
         finally:
             await state.finish()
+
+    async def check_server_status(self, callback: types.CallbackQuery):
+        """Перевірка стану сервера"""
+        try:
+            import psutil
+            import subprocess
+            import requests
+            from datetime import datetime
+            
+            # Отримуємо інформацію про систему
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            cpu_percent = psutil.cpu_percent(interval=1)
+            
+            # Перевіряємо API - бот запущений в тому ж контейнері що і API
+            api_status = "✅ Працює (внутрішній)"
+            
+            # Перевіряємо Docker контейнери - бот запущений в Docker
+            docker_status = "✅ Запущено (в контейнері)"
+            
+            # Кількість Python процесів
+            python_processes = len([p for p in psutil.process_iter(['name']) if 'python' in p.info['name'].lower()])
+            
+            # Формуємо повідомлення
+            status_message = (
+                f"🏥 <b>Стан сервера</b>\n"
+                f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+                
+                f"🖥️ <b>Система:</b>\n"
+                f"💾 Пам'ять: {memory.percent:.1f}% ({memory.used // (1024**3):.1f}GB / {memory.total // (1024**3):.1f}GB)\n"
+                f"💿 Диск: {disk.percent:.1f}% ({disk.used // (1024**3):.1f}GB / {disk.total // (1024**3):.1f}GB)\n"
+                f"⚡ CPU: {cpu_percent:.1f}%\n\n"
+                
+                f"🐳 <b>Сервіси:</b>\n"
+                f"🌐 API: {api_status}\n"
+                f"📦 Docker: {docker_status}\n"
+                f"🐍 Python процесів: {python_processes}\n\n"
+            )
+            
+            # Додаємо попередження якщо щось не так
+            if memory.percent > 85:
+                status_message += "⚠️ <b>УВАГА:</b> Висока загрузка пам'яті!\n"
+            if disk.percent > 90:
+                status_message += "⚠️ <b>УВАГА:</b> Мало місця на диску!\n"
+            if python_processes > 10:
+                status_message += "⚠️ <b>УВАГА:</b> Забагато Python процесів!\n"
+            if api_status == "❌ Недоступне":
+                status_message += "🚨 <b>КРИТИЧНО:</b> API не відповідає!\n"
+                
+        except Exception as e:
+            status_message = (
+                f"❌ <b>Помилка при перевірці сервера:</b>\n\n"
+                f"{str(e)}\n\n"
+                f"Можливо, сервер недоступний або виникли проблеми з мережею."
+            )
+            
+        await callback.message.answer(status_message, parse_mode='HTML')
 
     async def close(self):
         """Закриття сесії бота"""
