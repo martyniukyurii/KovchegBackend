@@ -96,6 +96,7 @@ class ClientsEndpoints:
                 "login": data.get("email", ""),
                 "password": None,  # Клієнт створений адміном, пароль не потрібен
                 "user_type": "client",
+                "client_type": data.get("client_type", "buyer"),  # buyer, seller, landlord, tenant
                 "client_status": "active",
                 "client_interests": data.get("interests", []),
                 "client_budget": data.get("budget", {}),
@@ -211,7 +212,7 @@ class ClientsEndpoints:
             # Поля, які можна оновити
             updatable_fields = [
                 "first_name", "last_name", "email", "phone", 
-                "client_interests", "client_budget", "client_preferred_locations", 
+                "client_type", "client_interests", "client_budget", "client_preferred_locations", 
                 "client_notes", "client_status", "assigned_admin_id"
             ]
             for field in updatable_fields:

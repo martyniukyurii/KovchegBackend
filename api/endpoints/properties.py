@@ -523,6 +523,8 @@ class PropertiesEndpoints:
                 "features": data.get("features", []),
                 "images": data.get("images", []),
                 "owner_id": user_id,
+                "client_id": data.get("client_id"),  # ID клієнта до якого прив'язана нерухомість
+                "client_type": data.get("client_type"),  # buyer, seller, landlord, tenant
                 "status": "active",
                 "is_featured": False,
                 "created_at": datetime.utcnow(),
@@ -904,6 +906,102 @@ class PropertiesEndpoints:
         except Exception as e:
             return Response.error(
                 message=f"Помилка при отриманні обраних об'єктів: {str(e)}",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    async def get_all_properties_with_admin_contacts(
+        self,
+        request: Request,
+        page: int = Query(1, ge=1),
+        limit: int = Query(10, ge=1, le=50)
+    ) -> Dict[str, Any]:
+        """
+        🔒 АДМІНСЬКИЙ ENDPOINT: Отримати всю нерухомість з контактами адмінів-власників.
+        
+        Дозволяє адмінам переглядати нерухомість створену іншими адмінами
+        з їх контактною інформацією для співпраці.
+        """
+        try:
+            # Отримання користувача з токена
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                return Response.error("Токен авторизації обов'язковий", status_code=status.HTTP_401_UNAUTHORIZED)
+            
+            token = auth_header.split(" ")[1]
+            payload = self.jwt_handler.decode_token(token)
+            user_id = payload.get("sub")
+            
+            if not user_id:
+                return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
+
+            # Перевірка що користувач є адміном
+            admin = await self.db.admins.find_one({"_id": ObjectId(user_id)})
+            if not admin:
+                return Response.error("Доступ тільки для адмінів", status_code=status.HTTP_403_FORBIDDEN)
+
+            skip = (page - 1) * limit
+            
+            # Агрегація для об'єднання нерухомості з інформацією про адмінів
+            pipeline = [
+                {"$match": {"status": "active"}},
+                {"$lookup": {
+                    "from": "admins",
+                    "localField": "owner_id",
+                    "foreignField": "_id",
+                    "as": "admin_info"
+                }},
+                {"$unwind": {
+                    "path": "$admin_info",
+                    "preserveNullAndEmptyArrays": True
+                }},
+                {"$project": {
+                    "_id": 1,
+                    "title": 1,
+                    "description": 1,
+                    "property_type": 1,
+                    "transaction_type": 1,
+                    "price": 1,
+                    "area": 1,
+                    "rooms": 1,
+                    "location": 1,
+                    "features": 1,
+                    "images": 1,
+                    "client_id": 1,
+                    "client_type": 1,
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "admin_contacts": {
+                        "admin_id": "$admin_info._id",
+                        "name": "$admin_info.name",
+                        "email": "$admin_info.email",
+                        "phone": "$admin_info.phone",
+                        "telegram_id": "$admin_info.telegram_id"
+                    }
+                }},
+                {"$sort": {"created_at": -1}},
+                {"$skip": skip},
+                {"$limit": limit}
+            ]
+            
+            properties = await self.db.properties.aggregate(pipeline)
+            properties = convert_objectid(properties)
+            
+            # Підрахунок загальної кількості
+            total = await self.db.properties.count_documents({"status": "active"})
+            
+            return Response.success({
+                "properties": properties,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": total,
+                    "pages": (total + limit - 1) // limit
+                }
+            })
+            
+        except Exception as e:
+            return Response.error(
+                message=f"Помилка при отриманні нерухомості з контактами: {str(e)}",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

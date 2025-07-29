@@ -57,7 +57,7 @@ class ParsedListingsEndpoints:
         min_rooms: Optional[int] = Query(None, ge=0, description="Мінімальна кількість кімнат"),
         max_rooms: Optional[int] = Query(None, ge=0, description="Максимальна кількість кімнат"),
         city: Optional[str] = Query(None, description="Місто"),
-        sort_by: Optional[str] = Query("parsed_at", description="Поле для сортування (parsed_at, price, area, rooms, created_at)"),
+        sort_by: Optional[str] = Query("created_at", description="Поле для сортування (parsed_at, price, area, rooms, created_at)"),
         sort_order: Optional[str] = Query("desc", description="Порядок сортування (asc, desc)"),
         search_text: Optional[str] = Query(None, description="Пошук по тексту в назві та описі"),
         page: int = Query(1, ge=1),
@@ -148,7 +148,7 @@ class ParsedListingsEndpoints:
                 ]
             
             # Формування сортування
-            sort_field = sort_by if sort_by in ["parsed_at", "price", "area", "rooms", "created_at"] else "parsed_at"
+            sort_field = sort_by if sort_by in ["parsed_at", "price", "area", "rooms", "created_at"] else "created_at"
             sort_direction = -1 if sort_order == "desc" else 1
             
             skip = (page - 1) * limit

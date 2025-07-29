@@ -155,6 +155,7 @@ class DealsEndpoints:
                 "property_id": data["property_id"],
                 "client_id": data["client_id"],
                 "admin_id": data.get("admin_id"),
+                "owner_id": data.get("owner_id", user_id),  # ID власника угоди (за замовчуванням створювач)
                 "type": data["type"],  # sale, rent, lease
                 "price": data["price"],
                 "commission": data.get("commission", 0),
