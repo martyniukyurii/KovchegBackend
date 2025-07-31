@@ -224,7 +224,7 @@ class OLXParser:
         """Зберігаємо оголошення в MongoDB та відправляємо в Telegram"""
         try:
             # Додаємо мета-дані
-            listing_data['parsed_at'] = datetime.now().isoformat()
+            listing_data['parsed_at'] = datetime.utcnow()
             listing_data['source'] = 'OLX'
             listing_data['is_active'] = True
             
@@ -816,7 +816,7 @@ class OLXParser:
                 'phone': phone,
                 'location': location,
                 'images': images,
-                'parsed_at': datetime.now().isoformat()
+                'parsed_at': datetime.utcnow()
             }
             
         except Exception as e:

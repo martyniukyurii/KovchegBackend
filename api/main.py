@@ -31,7 +31,7 @@ class CustomCorsMiddleware(BaseHTTPMiddleware):
                 content={},
                 status_code=200,
                 headers={
-                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Origin": "https://www.kovcheg.cv.ua",
                     "Access-Control-Allow-Credentials": "true",
                     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
                     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
@@ -43,7 +43,7 @@ class CustomCorsMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         
         # Додаємо CORS заголовки до всіх відповідей
-        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Origin"] = "https://www.kovcheg.cv.ua"
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
@@ -108,13 +108,10 @@ if not os.path.exists(static_dir):
     os.makedirs(static_dir)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# Додаємо наш власний CORS middleware
-app.add_middleware(CustomCorsMiddleware)
-
-# Додаємо стандартний CORS middleware як резервний варіант
+# Додаємо стандартний CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://www.kovcheg.cv.ua"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

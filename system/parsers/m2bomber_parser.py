@@ -269,7 +269,7 @@ class M2BomberParser:
         """Зберігаємо оголошення в MongoDB та відправляємо в Telegram"""
         try:
             # Додаємо мета-дані
-            listing_data['parsed_at'] = datetime.now().isoformat()
+            listing_data['parsed_at'] = datetime.utcnow()
             listing_data['source'] = 'M2BOMBER'
             listing_data['is_active'] = True
             
@@ -594,7 +594,7 @@ class M2BomberParser:
                 )
                 data['location'] = location
             
-            data['parsed_at'] = datetime.now().isoformat()
+            data['parsed_at'] = datetime.utcnow()
             
             return data
             
