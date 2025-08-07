@@ -4,6 +4,7 @@ from tools.logger import Logger
 from tools.config import DatabaseConfig
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
+import asyncio
 
 logger = Logger()
 
@@ -130,6 +131,12 @@ class Database:
         
         # Додаємо властивість admins для сумісності (посилається на admins з role="admin")
         self.admins = self.admins
+        
+        # Ініціалізуємо схему та індекси
+        asyncio.create_task(self.migrate_existing_data())  # Спочатку мігруємо дані
+        asyncio.create_task(self.setup_schema_validators())  # Потім встановлюємо валідатори
+        asyncio.create_task(self.setup_indexes())
+        asyncio.create_task(self.create_vector_indexes())
 
     async def _get_client(self) -> AsyncIOMotorClient:
         """Повертає асинхронного клієнта MongoDB."""
@@ -154,6 +161,147 @@ class Database:
         client = await self._get_client()
         db_name = user["collection_title"] if user else self.config.DB_NAME
         return client[db_name][collection_name]
+
+    async def migrate_existing_data(self):
+        """Мігрує існуючі дані до нової схеми."""
+        try:
+            client = await self._get_client()
+            db = client[self.config.DB_NAME]
+
+            # Міграція користувачів
+            async for user in db.users.find({}):
+                updates = {}
+                if "created_at" not in user:
+                    updates["created_at"] = datetime.utcnow()
+                if "updated_at" not in user:
+                    updates["updated_at"] = datetime.utcnow()
+                if "is_active" not in user:
+                    updates["is_active"] = True
+                if "role" not in user:
+                    updates["role"] = "user"
+                
+                if updates:
+                    await db.users.update_one({"_id": user["_id"]}, {"$set": updates})
+
+            # Міграція нерухомості
+            async for prop in db.properties.find({}):
+                updates = {}
+                if "created_at" not in prop:
+                    updates["created_at"] = datetime.utcnow()
+                if "updated_at" not in prop:
+                    updates["updated_at"] = datetime.utcnow()
+                if "is_active" not in prop:
+                    updates["is_active"] = True
+                
+                # Конвертація ціни в об'єкт якщо вона як число
+                if "price" in prop and isinstance(prop["price"], (int, float)):
+                    updates["price"] = {
+                        "amount": float(prop["price"]),
+                        "currency": "UAH"  # За замовчуванням
+                    }
+                
+                # Перевірка статусу
+                if "status" not in prop:
+                    updates["status"] = {
+                        "for_sale": True,
+                        "for_rent": False
+                    }
+                
+                if updates:
+                    await db.properties.update_one({"_id": prop["_id"]}, {"$set": updates})
+
+            logger.info("Міграцію даних успішно завершено")
+        except Exception as e:
+            logger.error(f"Помилка міграції даних: {e}")
+            pass
+
+    async def setup_schema_validators(self):
+        """Створює валідатори схеми для колекцій."""
+        try:
+            client = await self._get_client()
+            db = client[self.config.DB_NAME]
+
+            # Базові поля, які повинні бути в кожному документі
+            base_validator = {
+                "$jsonSchema": {
+                    "bsonType": "object",
+                    "required": ["created_at", "updated_at", "is_active"],
+                    "properties": {
+                        "created_at": {"bsonType": "date"},
+                        "updated_at": {"bsonType": "date"},
+                        "is_active": {"bsonType": "bool"}
+                    }
+                }
+            }
+
+            # Валідатор для користувачів
+            user_validator = {
+                "$jsonSchema": {
+                    "bsonType": "object",
+                    "required": ["email", "login", "password_hash", "role"],
+                    "properties": {
+                        "email": {"bsonType": "string", "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"},
+                        "login": {"bsonType": "string", "minLength": 3},
+                        "password_hash": {"bsonType": "string"},
+                        "role": {"enum": ["user", "admin", "superadmin"]}
+                    }
+                }
+            }
+
+            # Валідатор для нерухомості
+            property_validator = {
+                "$jsonSchema": {
+                    "bsonType": "object",
+                    "required": ["title", "description", "price", "location", "status"],
+                    "properties": {
+                        "title": {"bsonType": "string", "minLength": 5},
+                        "description": {"bsonType": "string"},
+                        "price": {
+                            "bsonType": "object",
+                            "required": ["amount", "currency"],
+                            "properties": {
+                                "amount": {"bsonType": "number", "minimum": 0},
+                                "currency": {"enum": ["USD", "EUR", "UAH"]}
+                            }
+                        },
+                        "location": {
+                            "bsonType": "object",
+                            "required": ["city", "address"],
+                            "properties": {
+                                "city": {"bsonType": "string"},
+                                "address": {"bsonType": "string"}
+                            }
+                        },
+                        "status": {
+                            "bsonType": "object",
+                            "required": ["for_sale", "for_rent"],
+                            "properties": {
+                                "for_sale": {"bsonType": "bool"},
+                                "for_rent": {"bsonType": "bool"}
+                            }
+                        }
+                    }
+                }
+            }
+
+            # Застосовуємо валідатори до колекцій з м'якою валідацією
+            await db.command({
+                "collMod": "users",
+                "validator": user_validator,
+                "validationLevel": "moderate",  # перевіряє тільки нові документи та модифікації
+                "validationAction": "warn"      # тільки попередження, без відхилення операцій
+            })
+            await db.command({
+                "collMod": "properties",
+                "validator": property_validator,
+                "validationLevel": "moderate",
+                "validationAction": "warn"
+            })
+
+            logger.info("Валідатори схеми успішно створено")
+        except Exception as e:
+            logger.error(f"Помилка створення валідаторів схеми: {e}")
+            pass
 
     async def setup_indexes(self):
         """Створює індекси для оптимізації запитів."""

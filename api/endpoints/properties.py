@@ -820,6 +820,149 @@ class PropertiesEndpoints:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    async def get_all_properties(
+        self,
+        request: Request,
+        page: int = Query(1, ge=1, description="Номер сторінки"),
+        limit: int = Query(20, ge=1, le=100, description="Кількість результатів на сторінці"),
+        status: Optional[str] = Query(None, description="Фільтр за статусом (active, inactive, deleted)"),
+        property_type: Optional[str] = Query(None, description="Фільтр за типом нерухомості"),
+        transaction_type: Optional[str] = Query(None, description="Фільтр за типом угоди (sale, rent)"),
+        city: Optional[str] = Query(None, description="Фільтр за містом")
+    ) -> Dict[str, Any]:
+        """
+        🔒 АДМІНСЬКИЙ ENDPOINT: Отримати всі об'єкти нерухомості (потребує прав адміна).
+        
+        Показує всі об'єкти нерухомості з можливістю фільтрації та пагінації.
+        Доступний тільки для адміністраторів.
+        
+        Заголовки:
+        Authorization: Bearer <jwt_token>
+        
+        Параметри запиту:
+        - page: номер сторінки (за замовчуванням 1)
+        - limit: кількість на сторінці (1-100, за замовчуванням 20)
+        - status: фільтр за статусом
+        - property_type: фільтр за типом нерухомості
+        - transaction_type: фільтр за типом угоди
+        - city: фільтр за містом
+        
+        Приклад запиту:
+        GET /properties/all?page=1&limit=20&status=active&property_type=apartment&city=Київ
+        
+        Приклад відповіді:
+        {
+            "status": "success",
+            "data": {
+                "properties": [
+                    {
+                        "_id": "507f1f77bcf86cd799439011",
+                        "title": "Квартира в центрі",
+                        "property_type": "apartment",
+                        "transaction_type": "sale",
+                        "price": 150000,
+                        "area": 80,
+                        "location": {
+                            "city": "Київ",
+                            "address": "вул. Хрещатик, 1"
+                        },
+                        "status": "active",
+                        "owner_id": "687619cebc3697db0a23b3b3",
+                        "created_at": "2024-01-15T10:30:00Z",
+                        "updated_at": "2024-01-15T10:30:00Z"
+                    }
+                ],
+                "pagination": {
+                    "page": 1,
+                    "limit": 20,
+                    "total": 45,
+                    "pages": 3
+                }
+            }
+        }
+        """
+        try:
+            # Отримання користувача з токена
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                return Response.error("Токен авторизації обов'язковий", status_code=status.HTTP_401_UNAUTHORIZED)
+            
+            token = auth_header.split(" ")[1]
+            payload = self.jwt_handler.decode_token(token)
+            user_id = payload.get("sub")
+            
+            if not user_id:
+                return Response.error("Невірний токен", status_code=status.HTTP_401_UNAUTHORIZED)
+            
+            # Перевірка прав адміністратора
+            admin = await self.db.admins.find_one({"_id": ObjectId(user_id)})
+            if not admin:
+                return Response.error("Доступ заборонено", status_code=status.HTTP_403_FORBIDDEN)
+            
+            # Формування фільтрів
+            filters = {}
+            
+            if status:
+                filters["status"] = status
+            if property_type:
+                filters["property_type"] = property_type
+            if transaction_type:
+                filters["transaction_type"] = transaction_type
+            if city:
+                filters["location.city"] = {"$regex": city, "$options": "i"}
+            
+            # Пагінація
+            skip = (page - 1) * limit
+            
+            # Агрегація для отримання даних
+            pipeline = [
+                {"$match": filters},
+                
+                # Lookup для отримання інформації про власника
+                {"$lookup": {
+                    "from": "admins",
+                    "let": {"owner_id": {"$toObjectId": "$owner_id"}},
+                    "pipeline": [
+                        {"$match": {"$expr": {"$eq": ["$_id", "$$owner_id"]}}},
+                        {"$project": {"name": 1, "email": 1}}
+                    ],
+                    "as": "owner_info"
+                }},
+                
+                # Розгортаємо масив owner_info
+                {"$unwind": {"path": "$owner_info", "preserveNullAndEmptyArrays": True}},
+                
+                # Сортування за датою створення (новіші спочатку)
+                {"$sort": {"created_at": -1}},
+                
+                # Пагінація
+                {"$skip": skip},
+                {"$limit": limit}
+            ]
+            
+            # Отримання даних
+            properties = await self.db.properties.aggregate(pipeline)
+            properties = convert_objectid(properties)
+            
+            # Підрахунок загальної кількості
+            total = await self.db.properties.count_documents(filters)
+            
+            return Response.success({
+                "properties": properties,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": total,
+                    "pages": (total + limit - 1) // limit
+                }
+            })
+            
+        except Exception as e:
+            return Response.error(
+                message=f"Помилка при отриманні списку нерухомості: {str(e)}",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
     async def get_favorites(self, request: Request) -> Dict[str, Any]:
         """
         👤 КОРИСТУВАЦЬКИЙ ENDPOINT: Отримати обрані об'єкти (потребує авторизації).

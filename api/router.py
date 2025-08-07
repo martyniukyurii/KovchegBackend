@@ -106,6 +106,7 @@ class Router:
         self.properties_router.post("/sell", summary="Подати заявку на продаж нерухомості")(self.properties_handler.submit_sell_request)
         
         # Properties routes (з JWT токеном)
+        self.properties_router.get("/all", summary="Отримати всі об'єкти нерухомості (адмін)")(self.properties_handler.get_all_properties)
         self.properties_router.get("/my", summary="Мої об'єкти нерухомості")(self.properties_handler.get_my_properties)
         self.properties_router.post("/", summary="Створити об'єкт нерухомості")(self.properties_handler.create_property)
         self.properties_router.get("/admin-contacts", summary="Вся нерухомість з контактами адмінів")(self.properties_handler.get_all_properties_with_admin_contacts)
